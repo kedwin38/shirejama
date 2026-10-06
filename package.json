@@ -1,0 +1,14 @@
+{
+  "name": "shire-jama-lms",
+  "version": "1.0.0",
+  "description": "Shire Jama LMS — role-based learning management system for Shire Jama'a Ahmed Adult School. Zero runtime dependencies.",
+  "type": "module",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "seed": "node server/seed.js --run",
+    "test": "node scripts/smoke-test.js"
+  },
+  "engines": { "node": ">=22.5.0" },
+  "license": "MIT"
+}

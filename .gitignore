@@ -1,0 +1,26 @@
+# Runtime state — never commit (live DB with credential hashes, uploads, backups)
+data/
+
+# Portable dev tools + credential material (never commit)
+.tools/
+*.token
+token.txt
+
+# Environment / secrets
+.env
+.env.*
+*.pem
+
+# Logs
+*.log
+logs/
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor artifacts
+.vscode/
+.idea/
+*.swp
