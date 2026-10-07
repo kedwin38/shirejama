@@ -1,0 +1,25 @@
+# ── Shire Jama LMS · Cloudflare Workers deployment ────────────────────────
+# Deploy:  CLOUDFLARE_API_TOKEN=… npx wrangler deploy
+name = "shirejama"
+main = "worker.js"
+compatibility_date = "2026-10-01"
+compatibility_flags = ["nodejs_compat"]
+
+# SPA served from Workers Assets (free + unlimited static requests);
+# /api/* always hits the Worker.
+[assets]
+directory = "../public"
+not_found_handling = "single-page-application"
+run_worker_first = ["/api/*"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "shirejama"
+database_id = "af119a76-b12a-44e6-ae8d-588cc009a38d"
+
+[[r2_buckets]]
+binding = "MEDIA"
+bucket_name = "shirejama-media"
+
+[triggers]
+crons = ["*/30 * * * *"]

@@ -9,11 +9,19 @@ import { log } from '../server/core/log.js';
 
 const starts = (buf, bytes, off = 0) => bytes.every((b, i) => buf[off + i] === b);
 
+// Uint8Array.toString() ignores arguments (unlike Buffer) — decode latin1
+// bytes explicitly so magic-byte checks work identically on workerd.
+const latin1 = (buf, start, end) => {
+  let s = '';
+  for (let i = start; i < end; i++) s += String.fromCharCode(buf[i]);
+  return s;
+};
+
 const sniff = {
-  pdf: (b) => b.subarray(0, 5).toString('latin1') === '%PDF-',
+  pdf: (b) => latin1(b, 0, 5) === '%PDF-',
   video: (b) => {
-    if (b.length >= 12 && b.subarray(4, 8).toString('latin1') === 'ftyp') {
-      const brand = b.subarray(8, 12).toString('latin1').toLowerCase();
+    if (b.length >= 12 && latin1(b, 4, 8) === 'ftyp') {
+      const brand = latin1(b, 8, 12).toLowerCase();
       return /^(isom|iso2|mp41|mp42|avc1|dash|msnv|m4v |qt  |qt00|3gp\d|heic|caaa)/.test(brand)
         || brand.startsWith('iso') || brand.startsWith('mp4') || brand.startsWith('avc');
     }
@@ -23,7 +31,7 @@ const sniff = {
   image: (b) => starts(b, [0x89, 0x50, 0x4e, 0x47])
     || starts(b, [0xff, 0xd8, 0xff])
     || starts(b, [0x47, 0x49, 0x46, 0x38])
-    || (b.subarray(0, 4).toString('latin1') === 'RIFF' && b.subarray(8, 12).toString('latin1') === 'WEBP'),
+    || (latin1(b, 0, 4) === 'RIFF' && latin1(b, 8, 12) === 'WEBP'),
   answer: (b) => sniff.pdf(b)
     || starts(b, [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1])
     || starts(b, [0x50, 0x4b, 0x03, 0x04])
@@ -139,13 +147,22 @@ export class R2Vault {
     const capped = capStream(storeBranch, cap, () =>
       new AppError(413, 'payload_too_large', `File exceeds the maximum permitted size of ${Math.floor(cap / 1024 / 1024)} MB.`));
 
+    // R2 only accepts streams of KNOWN length; a tee()'d body branch is
+    // unknown-length, so bridge it through FixedLengthStream(content-length).
+    // (len>0 is guaranteed: an empty body fails the head.length check above.)
+    const fls = new FixedLengthStream(len);
+    const piped = capped.pipeTo(fls.writable);
+
     let size;
     try {
-      const put = await this.bucket.put(key, capped, { httpMetadata: { contentType: mime } });
+      const put = await this.bucket.put(key, fls.readable, { httpMetadata: { contentType: mime } });
       size = put.size;
+      await piped; // surface any cap-overflow/pipe error
     } catch (e) {
+      piped.catch(() => {});
       await this.bucket.delete(key).catch(() => {});
-      throw e instanceof AppError ? e : new AppError(413, 'payload_too_large', e.message);
+      throw e instanceof AppError ? e
+        : new AppError(500, 'internal_error', `Storing the file failed: ${e.message}`);
     }
     return { stored_path: key, file_name: origName, mime, size };
   }

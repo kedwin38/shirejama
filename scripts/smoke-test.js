@@ -72,9 +72,9 @@ async function main() {
   console.log('\n2 · Authentication (FR-1.x)');
   r = await other('POST', '/api/auth/login', { body: { role: 'admin', identifier: 'admin', password: 'WRONG' } });
   ok('wrong password rejected', r.status === 401);
-  r = await call('admin', 'POST', '/api/auth/login', { body: { role: 'student', identifier: 'admin', password: 'Admin@Shire2026' } });
+  r = await call('admin', 'POST', '/api/auth/login', { body: { role: 'student', identifier: 'admin', password: process.env.ADMIN_PASSWORD || 'Admin@Shire2026' } });
   ok('role mismatch rejected', r.status === 401);
-  r = await call('admin', 'POST', '/api/auth/login', { body: { role: 'admin', identifier: 'admin', password: 'Admin@Shire2026' } });
+  r = await call('admin', 'POST', '/api/auth/login', { body: { role: 'admin', identifier: 'admin', password: process.env.ADMIN_PASSWORD || 'Admin@Shire2026' } });
   ok('admin login sets session', r.status === 200 && r.data.user?.role === 'admin' && jars.admin?.sid);
   r = await admin('GET', '/api/auth/me');
   ok('session resolves via /me', r.status === 200 && r.data.user?.username === 'admin');
@@ -325,18 +325,21 @@ async function main() {
 
   /* 15 · backups (FR-7) */
   console.log('\n15 · Backup console (FR-7)');
+  const CF = process.env.CF === '1'; // Workers build: JSON dumps (no VACUUM INTO)
   r = await admin('GET', '/api/admin/backups');
   ok('backup config + history readable', r.status === 200 && r.data.config);
-  r = await admin('PUT', '/api/admin/backups/config', { body: { enabled: true, frequency: 'daily', scope: 'accounts', format: 'json', retention: 5 } });
+  r = await admin('PUT', '/api/admin/backups/config', { body: { enabled: true, frequency: 'daily', scope: 'accounts', format: CF ? 'json' : 'sqlite', retention: 5 } });
   ok('policy saved', r.status === 200 && r.data.config.scope === 'accounts');
-  r = await admin('POST', '/api/admin/backups/run', { body: { scope: 'full', format: 'sqlite' } });
-  ok('sqlite snapshot runs', r.status === 200 && r.data.backup?.size_bytes > 0);
+  r = await admin('POST', '/api/admin/backups/run', { body: { scope: 'full', format: CF ? 'json' : 'sqlite' } });
+  ok(`${CF ? 'json dump' : 'sqlite snapshot'} runs`, r.status === 200 && r.data.backup?.size_bytes > 0);
   const backupId = r.data.backup.id;
   r = await admin('POST', '/api/admin/backups/run', { body: { scope: 'results', format: 'json' } });
-  ok('json dump runs', r.status === 200);
+  ok('scoped json dump runs', r.status === 200);
   const dl = await fetch(`${BASE}/api/admin/backups/${backupId}/download`, { headers: { 'X-Requested-With': 'fetch', Cookie: cookieHeader('admin') } });
   const dlBytes = Buffer.from(await dl.arrayBuffer());
-  ok('backup downloads (valid sqlite header)', dl.status === 200 && dlBytes.subarray(0, 15).toString().startsWith('SQLite format 3'));
+  ok('backup downloads (' + (CF ? 'valid JSON' : 'valid sqlite header') + ')', dl.status === 200
+    && (CF ? JSON.parse(dlBytes.toString('utf8')).meta?.product === 'Shire Jama LMS'
+           : dlBytes.subarray(0, 15).toString().startsWith('SQLite format 3')));
   r = await student('GET', `/api/admin/backups/${backupId}/download`);
   ok('students cannot download backups', r.status === 401 || r.status === 403);
 

@@ -29,7 +29,6 @@ import { D1Port } from './d1-port.js';
 import { R2Vault } from './r2-vault.js';
 import { R2BackupTarget } from './r2-backup-target.js';
 import { jsonResponse, errorResponse, readJsonBody, parseCookies, cookieHeader, serveR2Object } from './kernel-http.js';
-import { SPA_ASSETS } from './spa-assets.js';
 
 let wiring = null; // built lazily on first request, reused across the isolate's lifetime
 
@@ -133,23 +132,10 @@ export default {
     const url = new URL(request.url);
     if (!url.pathname.startsWith('/api/')) {
       // The frontend is a hash-router SPA (routes live in location.hash,
-      // which the server never sees), so every real GET is for one of a
-      // fixed set of static paths — served here from an in-module map
-      // since Cloudflare Workers Assets carryover isn't reachable from
-      // this deploy pipeline. Binary assets (fonts, seal.jpeg) are not
-      // embedded and will 404 (cosmetic gap only).
-      const path = url.pathname === '/' ? '/index.html' : url.pathname;
-      const asset = SPA_ASSETS[path];
-      if (asset) {
-        return new Response(asset.content, {
-          status: 200,
-          headers: {
-            'Content-Type': asset.contentType,
-            'Cache-Control': path === '/index.html' ? 'no-cache' : 'public, max-age=3600',
-          },
-        });
-      }
-      return errorResponse(new AppError(404, 'not_found', 'Not found.'));
+      // which the server never sees) — served by Workers Assets with SPA
+      // fallback (wrangler.toml [assets]); static requests are free and
+      // unlimited and never invoke this Worker.
+      return env.ASSETS.fetch(request);
     }
     return await handleApi(request, env, url.pathname);
   },
