@@ -624,21 +624,74 @@ async function renderSubmissions(main) {
     draw(submissions);
   };
   const draw = (rows) => {
-    wrap.replaceChildren(rows.length === 0
-      ? el('div', { class: 'card frame' }, el('div', { class: 'empty' },
-          el('div', { class: 'e-ico' }, icons.inbox()),
-          el('h4', {}, 'No submissions here'), el('p', {}, 'When your students submit quizzes, attempts appear in this overview.')))
-      : el('div', { class: 'table-wrap' }, el('table', { class: 'tbl' },
-        el('thead', {}, el('tr', {}, ['Student', 'Quiz · Course', 'Attempt', 'Submitted', 'Score', 'Status', ''].map((h) => el('th', {}, h)))),
-        el('tbody', {}, rows.map((s) => el('tr', {},
-          el('td', {}, el('b', {}, s.student_name), el('div', { class: 'faint mono', style: 'font-size:11px' }, s.student_code || '')),
-          el('td', {}, el('b', { style: 'font-weight:600' }, s.quiz_title), el('div', { class: 'faint', style: 'font-size:11.5px' }, s.course_title)),
-          el('td', { class: 'mono' }, `#${s.attempt_no}`),
-          el('td', {}, s.submitted_at ? fmtDateTime(s.submitted_at) : '—'),
-          el('td', { class: 'mono' }, s.score != null ? `${s.score} / ${s.max_score}` : '—'),
-          statusChip(s),
-          el('td', {}, el('button', { class: 'btn sm ghost', onclick: () => gradingDrawer(s) }, 'Review answers')),
-        ))))));
+    if (rows.length === 0) {
+      wrap.replaceChildren(el('div', { class: 'card frame' }, el('div', { class: 'empty' },
+        el('div', { class: 'e-ico' }, icons.inbox()),
+        el('h4', {}, 'No submissions here'), el('p', {}, 'When your students submit quizzes, attempts appear in this overview.'))));
+      return;
+    }
+
+    // Group attempts per student (independently), and within each student
+    // sort by course — courses ordered by most recent activity, attempts
+    // within a course newest-first.
+    const byStudent = new Map();
+    for (const s of rows) {
+      if (!byStudent.has(s.student_id)) byStudent.set(s.student_id, []);
+      byStudent.get(s.student_id).push(s);
+    }
+    const groups = [...byStudent.entries()]
+      .map(([sid, attempts]) => {
+        const byCourse = new Map();
+        for (const a of attempts) {
+          if (!byCourse.has(a.course_id)) byCourse.set(a.course_id, []);
+          byCourse.get(a.course_id).push(a);
+        }
+        const courses = [...byCourse.entries()].map(([cid, list]) => ({
+          course_id: cid,
+          title: list[0].course_title,
+          attempts: list.sort((x, y) => Date.parse(y.submitted_at ?? y.started_at) - Date.parse(x.submitted_at ?? x.started_at)),
+          latest: Math.max(...list.map((a) => Date.parse(a.submitted_at ?? a.started_at))),
+          pending: list.filter((a) => a.status === 'submitted').length,
+        })).sort((x, y) => y.latest - x.latest);
+        return {
+          student_id: sid,
+          name: attempts[0].student_name,
+          code: attempts[0].student_code || '',
+          courses,
+          attempts: attempts.length,
+          pending: attempts.filter((a) => a.status === 'submitted').length,
+        };
+      })
+      .sort((a, b) => (b.pending - a.pending) || a.name.localeCompare(b.name)); // needs-grading first, then A→Z
+
+    wrap.replaceChildren(...groups.map((g) => el('div', { class: 'card frame mb-2' },
+      el('div', { class: 'card-pad', style: 'padding-bottom:10px' },
+        el('div', { class: 'row wrap', style: 'margin-bottom:8px' },
+          el('span', { class: 'ring-seal', style: 'width:34px;height:34px;font-family:var(--font-display);font-size:14px;color:var(--gold-700);flex-shrink:0' },
+            (g.name || '?').slice(0, 1).toUpperCase()),
+          el('div', { style: 'flex:1;min-width:160px' },
+            el('div', { style: 'font-weight:600' }, g.name),
+            el('div', { class: 'faint mono', style: 'font-size:11px' }, g.code || '—')),
+          el('span', { class: 'chip neutral' }, `${g.attempts} attempt${g.attempts === 1 ? '' : 's'}`),
+          el('span', { class: 'chip neutral' }, `${g.courses.length} course${g.courses.length === 1 ? '' : 's'}`),
+          g.pending > 0
+            ? el('span', { class: 'chip warn' }, `${g.pending} awaiting you`)
+            : el('span', { class: 'chip ok' }, 'up to date')),
+        ...g.courses.map((c) => el('div', { style: 'margin-bottom:10px' },
+          el('div', { class: 'row', style: 'font-size:12px;margin-bottom:4px' },
+            el('span', { class: 'ic', style: 'color:var(--gold-600);width:15px;height:15px' }, icons.book()),
+            el('b', { style: 'font-weight:600;letter-spacing:.02em' }, c.title),
+            c.pending > 0 && el('span', { class: 'chip warn' }, `${c.pending} to review`)),
+          el('div', { class: 'table-wrap', style: 'box-shadow:none' }, el('table', { class: 'tbl' },
+            el('thead', {}, el('tr', {}, ['Quiz', 'Attempt', 'Submitted', 'Score', 'Status', ''].map((h) => el('th', {}, h)))),
+            el('tbody', {}, c.attempts.map((s) => el('tr', {},
+              el('td', {}, el('b', { style: 'font-weight:600' }, s.quiz_title)),
+              el('td', { class: 'mono' }, `#${s.attempt_no}`),
+              el('td', {}, s.submitted_at ? fmtDateTime(s.submitted_at) : '—'),
+              el('td', { class: 'mono' }, s.score != null ? `${s.score} / ${s.max_score}` : '—'),
+              statusChip(s),
+              el('td', {}, el('button', { class: 'btn sm ghost', onclick: () => gradingDrawer(s) }, 'Review answers')),
+            )))))))))));
   };
   const statusChip = (s) => {
     const m = {

@@ -29,10 +29,7 @@ export async function renderAdmin(main, route) {
 
 /* ── Overview ──────────────────────────────────────────────────────────── */
 async function renderOverview(main) {
-  const [stats, activity] = await Promise.all([
-    api.get('/api/admin/stats'),
-    api.get('/api/admin/activity?limit=12').catch(() => ({ signins: [] })),
-  ]);
+  const stats = await api.get('/api/admin/stats');
   main.replaceChildren(
     el('div', { class: 'page-head' },
       el('div', {},
@@ -48,27 +45,14 @@ async function renderOverview(main) {
       stat('Active Accounts', stats.activeAccounts, `${stats.inactiveAccounts} deactivated`, 'shield'),
       stat('Backups Taken', stats.backups, 'configurable in Backup Console', 'database'),
     ),
-    el('div', { class: 'grid-2 mt-3' },
-      el('div', { class: 'card frame' }, el('div', { class: 'card-pad' },
-        el('div', { class: 'card-title-row' }, el('h3', {}, 'Recent sign-ins'), el('span', { class: 'sub' }, 'latest portal access')),
-        activity.signins.length === 0
-          ? el('div', { class: 'list-note' }, 'No sign-ins recorded yet.')
-          : el('table', { class: 'tbl' },
-              el('thead', {}, el('tr', {}, ['Who', 'Role', 'Signed in', 'Last seen'].map((h) => el('th', {}, h)))),
-              el('tbody', {}, activity.signins.map((s) => el('tr', {},
-                el('td', {}, el('b', {}, s.full_name), el('div', { class: 'faint mono', style: 'font-size:11px' }, s.username)),
-                el('td', {}, el('span', { class: 'chip ' + (s.role === 'admin' ? 'gold' : s.role === 'teacher' ? 'info' : 'neutral') }, s.role)),
-                el('td', { style: 'font-size:12.5px' }, fmtDateTime(s.created_at)),
-                el('td', { class: 'faint', style: 'font-size:12px' }, fmtDateTime(s.last_seen_at)))))),
-      )),
-      el('div', { class: 'card frame' }, el('div', { class: 'card-pad' },
-        el('h3', {}, 'Institution rules'),
+    el('div', { class: 'card frame mt-3' }, el('div', { class: 'card-pad' },
+      el('h3', {}, 'Institution rules'),
         el('div', { class: 'list-note' },
           '• Students never self-register — every account is provisioned from ', el('b', {}, 'Provision Access'), '.'),
         el('div', { class: 'list-note' }, '• Teachers who still own courses cannot be deleted — deactivate or reassign first.'),
         el('div', { class: 'list-note' }, '• All uploaded files are served through permission-checked endpoints, never public URLs.'),
         el('div', { class: 'list-note' }, '• Configure automated account/result backups from the ', el('b', {}, 'Backup Console'), '.'),
-      ))),
+      )),
   );
 }
 const stat = (label, value, foot, ico) =>
