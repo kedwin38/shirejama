@@ -67,6 +67,7 @@ export const icons = {
   moon: I('<path d="M20 14.5A8.5 8.5 0 0 1 9.5 4 8.5 8.5 0 1 0 20 14.5z"/>'),
   search: I('<circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/>'),
   logout: I('<path d="M14.5 8V5.5a2 2 0 0 0-2-2h-7a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h7a2 2 0 0 0 2-2V16"/><path d="M9.5 12h11m-3-3 3 3-3 3"/>'),
+  menu: I('<path d="M4 7h16M4 12h16M4 17h16"/>'),
   chart: I('<path d="M4.5 20h15"/><path d="M7.5 20v-6M12 20V8M16.5 20v-9.5"/>'),
   award: I('<circle cx="12" cy="9" r="5.5"/><path d="m8.5 13.5-1.5 7 5-2.6 5 2.6-1.5-7"/>'),
   grid: I('<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/>'),

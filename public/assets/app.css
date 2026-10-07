@@ -510,6 +510,106 @@ table.tbl{ width:100%; border-collapse:collapse; font-size:13.5px; }
   @keyframes vt-in{ from{ opacity:0; transform:translateY(8px);} }
 }
 
+/* ════════════════ RESPONSIVE · MOBILE ════════════════
+   Under 920px the left rail becomes an off-canvas drawer with a
+   scrim, opened by the topbar hamburger and closed by the scrim,
+   Escape, or any navigation. Grids collapse, the topbar compacts
+   to icon-only controls, and tables scroll horizontally inside
+   their wrappers instead of overlapping the viewport. */
+.menu-btn{ display:none; }
+.rail-scrim{ display:none; }
+
+@media (max-width: 920px){
+  /* topbar: keep it to one row of icon controls */
+  .menu-btn{ display:inline-flex; }
+  .crumbs{ display:none; }
+  .topbar{ gap:6px; padding:0 8px; }
+  .topbar .word-sub{ display:none; }
+  .topbar .word-title{ font-size:12px; letter-spacing:.08em; }
+  .topbar .wordmark img{ width:28px; height:28px; }
+  .palette-btn{ display:none; }              /* no keyboard on phones */
+  .userchip{ padding:3px; }
+  .userchip .uname, .userchip .urole{ display:none; } /* avatar only */
+  .icon-btn .kbd{ display:none; }
+
+  /* rail → off-canvas drawer */
+  .rail{
+    position:fixed; left:0; top:var(--topbar-h); bottom:0; z-index:90;
+    width:min(78vw, 300px); height:auto;
+    transform:translateX(-105%);
+    transition:transform .25s var(--ease);
+    box-shadow:var(--shadow-pop);
+  }
+  .rail.open{ transform:translateX(0); }
+  .rail-scrim{
+    display:block; position:fixed; inset:var(--topbar-h) 0 0 0;
+    background:rgba(11,27,16,.5); z-index:80;
+    opacity:0; pointer-events:none; transition:opacity .2s;
+  }
+  .rail-scrim.show{ opacity:1; pointer-events:auto; }
+  body.rail-open{ overflow:hidden; }
+
+  .main{ padding:18px 14px 90px; min-width:0; }
+
+  /* grids collapse */
+  .stat-grid{ grid-template-columns:repeat(2, 1fr); gap:10px; }
+  .course-grid{ grid-template-columns:1fr; }
+  .bk-grid{ grid-template-columns:1fr; }
+  .grid-2{ grid-template-columns:1fr; }
+
+  /* page headers stack; actions wrap onto their own row */
+  .page-head{ align-items:flex-start; }
+  .page-head .head-actions{ margin-left:0; width:100%; flex-wrap:wrap; }
+
+  /* tabs scroll horizontally instead of wrapping tall */
+  .tabs{ flex-wrap:nowrap; overflow-x:auto; -webkit-overflow-scrolling:touch;
+    scrollbar-width:none; }
+  .tabs::-webkit-scrollbar{ display:none; }
+  .tab{ white-space:nowrap; flex-shrink:0; }
+
+  /* denser tables (wrapper scrolls) */
+  .tbl th, .tbl td{ padding:8px; font-size:12.5px; }
+  .table-wrap{ max-width:100%; }
+
+  /* quiz runner */
+  .runner-top{ flex-wrap:wrap; gap:8px; }
+  .q-nav-dots{ margin-left:0; width:100%; }
+
+  /* theater + modals fit the viewport */
+  .theater-bar{ flex-wrap:wrap; row-gap:6px; }
+  .modal-card{ width:calc(100vw - 20px); max-height:92vh; }
+  .card-pad{ padding:16px 14px; }
+  .chapter-head{ padding:10px 12px; row-gap:8px; }
+  .done-check{ padding:5px 8px; font-size:11.5px; }
+}
+
+@media (max-width: 560px){
+  :root{ --topbar-h:54px; }
+  .stat .s-value{ font-size:26px; }
+  .stat .s-ico{ width:24px; height:24px; top:10px; right:10px; }
+  .main{ padding:14px 10px 90px; }
+  .page-head h1{ font-size:20px; }
+  .btn.lg{ width:100%; }
+  .btn{ padding:9px 12px; font-size:12.5px; }
+
+  /* gate: tighter role cards, full-width sign-in */
+  .gate-right{ padding:20px 12px; }
+  .role-cards{ gap:7px; }
+  .role-card{ padding:12px 6px 10px; }
+  .role-card .rc-ring{ width:36px; height:36px; font-size:14px; }
+  .role-card .rc-name{ font-size:11.5px; }
+  .role-card .rc-desc{ display:none; }
+  .gate-motto{ font-size:26px; }
+
+  .timer-pill{ font-size:14px; padding:6px 12px; gap:6px; }
+  .ring{ --size:40px; } .ring.lg{ --size:54px; }
+  .grade-item{ padding:12px 12px; }
+  .opt-row{ padding:7px 8px; }
+  .choice{ padding:10px 10px; }
+  .modal-foot{ flex-wrap:wrap; }
+  .modal-foot .btn{ flex:1; }
+}
+
 /* print: result breakdowns */
 @media print{
   .topbar, .rail, .head-actions, .btn, .no-print{ display:none !important; }

@@ -99,13 +99,15 @@ function renderShell() {
   app.replaceChildren(
     el('div', { class: 'shell' },
       el('header', { class: 'topbar weave' },
+        el('button', { class: 'icon-btn menu-btn', title: 'Menu', 'aria-label': 'Open navigation menu',
+          'aria-expanded': 'false', onclick: toggleRail }, icons.menu()),
         el('a', { class: 'wordmark', href: '#' + nav[0].path, 'aria-label': 'Shire Jama LMS home' },
           el('img', { src: '/assets/brand/mark.svg', alt: '' }),
           el('div', {}, el('div', { class: 'word-title' }, 'SHIRE JAMA LMS'),
             el('div', { class: 'word-sub' }, 'Education Without Limits'))),
         el('div', { class: 'crumbs', id: 'crumbs' }),
         el('div', { class: 'top-spacer' }),
-        el('button', { class: 'icon-btn', title: 'Command palette (Ctrl+K)', onclick: openPalette },
+        el('button', { class: 'icon-btn palette-btn', title: 'Command palette (Ctrl+K)', onclick: openPalette },
           icons.command(), el('span', { class: 'kbd' }, 'Ctrl K')),
         el('button', { class: 'icon-btn', title: 'Day / Dusk theme', onclick: () => { state.theme = state.theme === 'day' ? 'dusk' : 'day'; applyTheme(state.theme); } },
           state.theme === 'day' ? icons.moon() : icons.sun(), 'Theme'),
@@ -116,16 +118,35 @@ function renderShell() {
         el('button', { class: 'icon-btn', title: 'Sign out', onclick: doLogout }, icons.logout()),
       ),
       el('div', { class: 'shell-body' },
-        el('aside', { class: 'rail weave' }, navLinks,
+        el('aside', { class: 'rail weave', id: 'rail' }, navLinks,
           el('div', { class: 'rail-foot' },
             el('b', {}, 'SHIRE JAMA\'A AHMED'),
             el('br'), 'Adult School · LMS v1.0')),
+        el('div', { class: 'rail-scrim', id: 'rail-scrim', onclick: toggleRail }),
         main),
     ),
   );
   document.getElementById('userchip').addEventListener('click', openAccountMenu);
   document.getElementById('userchip').addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openAccountMenu(); } });
 }
+
+/* ── Mobile navigation drawer ─────────────────────────────────────────── */
+function toggleRail(force) {
+  const rail = document.getElementById('rail');
+  const scrim = document.getElementById('rail-scrim');
+  if (!rail || !scrim) return;
+  const open = typeof force === 'boolean' ? force : !rail.classList.contains('open');
+  rail.classList.toggle('open', open);
+  scrim.classList.toggle('show', open);
+  document.body.classList.toggle('rail-open', open);
+  const btn = document.querySelector('.menu-btn');
+  if (btn) btn.setAttribute('aria-expanded', String(open));
+}
+// close the drawer on any navigation and on Escape
+window.addEventListener('hashchange', () => toggleRail(false));
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') toggleRail(false);
+});
 
 function openAccountMenu() {
   openModal((card, done) => {
