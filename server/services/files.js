@@ -142,7 +142,7 @@ export class FileVault {
     return token;
   }
 
-  removeQuietly(path) {
+  async removeQuietly(path) {
     if (!path) return;
     try { unlinkSync(path); } catch (e) { if (e.code !== 'ENOENT') log.warn('file_unlink_failed', { path, err: e.code }); }
   }
@@ -150,8 +150,8 @@ export class FileVault {
   // ── Permission-resolving accessors (FR-6.2 / FR-6.3) ───────────────────
 
   /** Material + its course/levels for authorization. */
-  materialContext(id) {
-    return this.db.prepare(`
+  async materialContext(id) {
+    return await this.db.prepare(`
       SELECT m.*, c.teacher_id, c.id AS course_id, c.title AS course_title
       FROM materials m
       JOIN chapters ch ON ch.id = m.chapter_id
@@ -161,8 +161,8 @@ export class FileVault {
   }
 
   /** Question (+quiz→chapter→course chain) for image/attachment serving. */
-  questionContext(id) {
-    return this.db.prepare(`
+  async questionContext(id) {
+    return await this.db.prepare(`
       SELECT q.*, c.teacher_id, c.id AS course_id
       FROM questions q
       JOIN quizzes  z ON z.id = q.quiz_id
@@ -173,8 +173,8 @@ export class FileVault {
   }
 
   /** Student answer file + ownership chain. */
-  answerContext(id) {
-    return this.db.prepare(`
+  async answerContext(id) {
+    return await this.db.prepare(`
       SELECT a.file_path, a.file_name, a.id AS answer_id, a.attempt_id,
              a.question_id, at.student_id, c.teacher_id, c.id AS course_id
       FROM answers a
@@ -187,8 +187,9 @@ export class FileVault {
   }
 
   /** Course levels for a material/question's course (student gate). */
-  courseLevels(courseId) {
-    return this.db.prepare('SELECT level FROM course_levels WHERE course_id = ?')
-      .all(courseId).map((r) => r.level);
+  async courseLevels(courseId) {
+    const rows = await this.db.prepare('SELECT level FROM course_levels WHERE course_id = ?')
+      .all(courseId);
+    return rows.map((r) => r.level);
   }
 }

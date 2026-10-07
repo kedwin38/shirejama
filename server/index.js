@@ -10,7 +10,7 @@ import { RateLimiter } from './core/ratelimit.js';
 import { log } from './core/log.js';
 import { AppError } from './core/errors.js';
 import { Router } from './kernel/router.js';
-import { sendJson, sendError, readJsonBody, parseCookies, setCookie } from './kernel/http.js';
+import { sendJson, sendError, readJsonBody, parseCookies, setCookie, serveStoredFile } from './kernel/http.js';
 import { serveStatic, sendStatic } from './kernel/static.js';
 
 import { FileVault } from './services/files.js';
@@ -21,15 +21,16 @@ import { AttemptService } from './services/attempts.js';
 import { GradingService } from './services/grading.js';
 import { CatalogService } from './services/catalog.js';
 import { AnalyticsService } from './services/analytics.js';
-import { BackupEngine, BackupScheduler, LocalDiskTarget,
-         SQLiteSnapshotFormat, JSONDumpFormat } from './services/backups.js';
+import { BackupEngine, BackupScheduler, JSONDumpFormat } from './services/backups.js';
+import { LocalDiskTarget, SQLiteSnapshotFormat } from './services/backups-node.js';
 
 import { registerAuthRoutes } from './routes/auth.routes.js';
 import { registerAdminRoutes } from './routes/admin.routes.js';
 import { registerTeacherRoutes } from './routes/teacher.routes.js';
 import { registerStudentRoutes } from './routes/student.routes.js';
 import { registerFileRoutes } from './routes/files.routes.js';
-import { seedAdmin, seedDemo } from './seed.js';
+import { seedAdmin } from './seed.js';
+import { seedDemo } from './seed-demo-node.js';
 
 // ── Bootstrap storage ─────────────────────────────────────────────────────
 for (const dir of [config.dataDir, config.stagingDir, config.backupsDir,
@@ -41,6 +42,7 @@ const db = new DatabasePort(config.dbFile);
 db.exec(readFileSync(join(config.root, 'server', 'schema.sql'), 'utf8'));
 
 const sessions = new SessionStore(db, config.sessionTtlHours);
+await sessions.purgeExpired();
 const vault = new FileVault(db, config);
 const services = {
   users: new UserService(db),
@@ -67,6 +69,7 @@ const ctx = {
     maxAgeSeconds: config.sessionTtlHours * 3600,
   }),
   clearSessionCookie: (res) => setCookie(res, 'sid', '', { maxAgeSeconds: 0 }),
+  serveFile: async (req, res, descriptor) => serveStoredFile(req, res, descriptor),
 };
 registerAuthRoutes(router, ctx);
 registerAdminRoutes(router, ctx);
@@ -76,10 +79,10 @@ registerFileRoutes(router, ctx);
 router.get('/api/health', () => ({ ok: true, uptime_s: Math.round(process.uptime()), time: new Date().toISOString() }));
 
 // ── Seed (idempotent) ─────────────────────────────────────────────────────
-const { admin, created } = seedAdmin(db);
+const { admin, created } = await seedAdmin(db);
 if (created) log.info('admin_seeded', { username: admin.username });
 if (config.seedDemo) {
-  const r = seedDemo(db);
+  const r = await seedDemo(db);
   if (r.seeded) log.info('demo_seeded', { teacher: 'hodan.abdi', student: 'amina.yusuf' });
 }
 
@@ -110,8 +113,8 @@ const server = createServer(async (req, res) => {
       // Session resolution (sliding).
       const cookies = parseCookies(req);
       const token = cookies.sid || null;
-      let user = token ? sessions.resolve(token) : null;
-      if (user && token) sessions.touch(token);
+      let user = token ? await sessions.resolve(token) : null;
+      if (user && token) await sessions.touch(token);
 
       const match = router.match(req.method, pathName);
       if (!match) throw new AppError(404, 'not_found', `No such endpoint: ${req.method} ${pathName}`);

@@ -24,3 +24,11 @@ desktop.ini
 .vscode/
 .idea/
 *.swp
+
+# Dependencies (dev-only tooling)
+node_modules/
+
+# Wrangler local state
+.wrangler/
+dist/
+dist-verify/
