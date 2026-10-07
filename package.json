@@ -6,7 +6,7 @@
   "main": "server/index.js",
   "scripts": {
     "start": "node server/index.js",
-    "seed": "node server/seed.js --run",
+    "seed": "node server/seed-demo-node.js --run",
     "test": "node scripts/smoke-test.js"
   },
   "engines": { "node": ">=22.5.0" },

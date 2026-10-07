@@ -1,6 +1,7 @@
 // ── Auth routes (FR-1.x) ─────────────────────────────────────────────────
 import { unauthorized, forbidden, badRequest } from '../core/errors.js';
 import { verifyPassword } from '../core/passwords.js';
+import { getHeader } from '../core/validate.js';
 
 export function registerAuthRoutes(router, ctx) {
   const { db, sessions, services, config, limiter } = ctx;
@@ -14,7 +15,7 @@ export function registerAuthRoutes(router, ctx) {
     if (!limiter.check(`login:${ip}:${ident}`)) {
       throw unauthorized('Too many sign-in attempts. Please wait a minute and try again.');
     }
-    const user = db.prepare(
+    const user = await db.prepare(
       'SELECT * FROM users WHERE (username = ? COLLATE NOCASE OR email = ? COLLATE NOCASE) LIMIT 1'
     ).get(ident, ident);
 
@@ -25,13 +26,13 @@ export function registerAuthRoutes(router, ctx) {
     if (!user.is_active) {
       throw forbidden('This account has been deactivated. Please contact the administrator.');
     }
-    const token = sessions.create(user.id, ip, req.headers['user-agent']);
+    const token = await sessions.create(user.id, ip, getHeader(req, 'user-agent'));
     ctx.setSessionCookie(res, token);
     return { user: services.users.publicUser(user) };
   });
 
   router.post('/api/auth/logout', async (req, res, { token }) => {
-    if (token) sessions.destroy(token);
+    if (token) await sessions.destroy(token);
     ctx.clearSessionCookie(res);
     return { ok: true };
   });
@@ -43,6 +44,6 @@ export function registerAuthRoutes(router, ctx) {
 
   router.post('/api/auth/change-password', async (req, res, { user, body }) => {
     if (!user) throw unauthorized();
-    return services.users.changePassword(user, body?.current, body?.next);
+    return await services.users.changePassword(user, body?.current, body?.next);
   });
 }

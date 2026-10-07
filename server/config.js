@@ -2,7 +2,14 @@
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve, join } from 'node:path';
 
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+// import.meta.url is undefined under the Workers module runtime (no real
+// filesystem); ROOT and everything derived from it are never read there
+// (only Node-only files use dataDir/publicDir/etc.), so this just needs to
+// not throw on that runtime.
+const ROOT = (() => {
+  try { return resolve(dirname(fileURLToPath(import.meta.url)), '..'); }
+  catch { return '/'; }
+})();
 
 export const LEVELS = Object.freeze([
   'C1','C2','C3','C4','C5','C6','C7','C8','F1','F2','F3','F4',

@@ -3,8 +3,8 @@
 // caller's transaction so concurrent provisions cannot collide (UNIQUE
 // constraints back this up as the final guard).
 
-export function nextInstructorCode(db) {
-  const row = db.prepare(`
+export async function nextInstructorCode(db) {
+  const row = await db.prepare(`
     SELECT MAX(CAST(SUBSTR(instructor_code, 6) AS INTEGER)) AS m
     FROM users WHERE role='teacher' AND instructor_code LIKE 'INST-%'
   `).get();
@@ -12,9 +12,9 @@ export function nextInstructorCode(db) {
   return `INST-${next}`;
 }
 
-export function nextStudentId(db) {
+export async function nextStudentId(db) {
   const year = new Date().getUTCFullYear();
-  const row = db.prepare(`
+  const row = await db.prepare(`
     SELECT MAX(CAST(SUBSTR(student_id, ?) AS INTEGER)) AS m
     FROM users WHERE role='student' AND student_id LIKE ?
   `).get(`${`STD-${year}-`.length + 1}`, `STD-${year}-%`);
@@ -23,16 +23,16 @@ export function nextStudentId(db) {
 }
 
 const transliterate = (name) => name.toLowerCase()
-  .normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+  .normalize('NFKD').replace(/[̀-ͯ]/g, '')
   .replace(/[^a-z0-9]+/g, ' ').trim().split(/\s+/).filter(Boolean);
 
 /** Unique username from a full name: "Amina Yusuf" → amina.yusuf, amina.yusuf2 … */
-export function generateUsername(db, fullName) {
+export async function generateUsername(db, fullName) {
   const parts = transliterate(fullName);
   const base = (parts.length ? parts.join('.') : 'member').slice(0, 40);
   let candidate = base;
   let n = 2;
   const exists = db.prepare('SELECT 1 FROM users WHERE username = ? COLLATE NOCASE');
-  while (exists.get(candidate)) candidate = `${base}${n++}`;
+  while (await exists.get(candidate)) candidate = `${base}${n++}`;
   return candidate;
 }

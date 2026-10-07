@@ -5,8 +5,8 @@ import { nowIso } from '../core/validate.js';
 export class GradingService {
   constructor(db) { this.db = db; }
 
-  _attemptForTeacher(attemptId, teacherId) {
-    const t = this.db.prepare(`
+  async _attemptForTeacher(attemptId, teacherId) {
+    const t = await this.db.prepare(`
       SELECT t.*, z.title AS quiz_title, z.show_results, c.teacher_id, c.id AS course_id, c.title AS course_title
       FROM attempts t
       JOIN quizzes z  ON z.id  = t.quiz_id
@@ -20,14 +20,14 @@ export class GradingService {
   }
 
   /** FR-4.9 — submissions overview across the teacher's own courses. */
-  submissions(teacherId, { quizId, status }) {
+  async submissions(teacherId, { quizId, status }) {
     const where = ['c.teacher_id = ?'];
     const params = [teacherId];
     if (quizId) { where.push('t.quiz_id = ?'); params.push(quizId); }
     if (status && ['in_progress', 'submitted', 'graded', 'released'].includes(status)) {
       where.push('t.status = ?'); params.push(status);
     }
-    return this.db.prepare(`
+    const rows = await this.db.prepare(`
       SELECT t.id, t.attempt_no, t.status, t.started_at, t.submitted_at,
              t.auto_score, t.manual_total, t.graded_at, t.released_at,
              z.id AS quiz_id, z.title AS quiz_title,
@@ -45,7 +45,8 @@ export class GradingService {
       WHERE ${where.join(' AND ')}
       ORDER BY CASE t.status WHEN 'submitted' THEN 0 WHEN 'graded' THEN 1 ELSE 2 END, t.submitted_at DESC
       LIMIT 500
-    `).all(...params).map((r) => ({
+    `).all(...params);
+    return rows.map((r) => ({
       ...r,
       score: r.status === 'released' || r.status === 'graded'
         ? Math.round(((r.auto_score ?? 0) + (r.manual_total ?? 0)) * 100) / 100 : null,
@@ -53,25 +54,27 @@ export class GradingService {
   }
 
   /** FR-4.9 — full review payload for one attempt. */
-  review(teacherId, attemptId) {
-    const t = this._attemptForTeacher(attemptId, teacherId);
-    const student = this.db.prepare(
+  async review(teacherId, attemptId) {
+    const t = await this._attemptForTeacher(attemptId, teacherId);
+    const student = await this.db.prepare(
       'SELECT id, full_name, student_id, email, academic_level FROM users WHERE id = ?'
     ).get(t.student_id);
-    const questions = this.db.prepare(
+    const questions = await this.db.prepare(
       'SELECT * FROM questions WHERE quiz_id = ? ORDER BY position, id').all(t.quiz_id);
-    const answers = this.db.prepare('SELECT * FROM answers WHERE attempt_id = ?').all(attemptId);
+    const answers = await this.db.prepare('SELECT * FROM answers WHERE attempt_id = ?').all(attemptId);
     const ansBy = new Map(answers.map((a) => [a.question_id, a]));
 
-    const items = questions.map((q) => {
+    const items = [];
+    for (const q of questions) {
       const a = ansBy.get(q.id);
       let options = null;
       if (q.type === 'mc') {
-        options = this.db.prepare(
+        const rows = await this.db.prepare(
           'SELECT id, label, is_correct, position FROM options WHERE question_id = ? ORDER BY position'
-        ).all(q.id).map((o) => ({ ...o, is_correct: !!o.is_correct }));
+        ).all(q.id);
+        options = rows.map((o) => ({ ...o, is_correct: !!o.is_correct }));
       }
-      return {
+      items.push({
         question_id: q.id, answer_id: a?.id ?? null, type: q.type,
         prompt: q.prompt, points: q.points,
         has_image: !!q.image_path, has_attachment: !!q.attachment_path,
@@ -82,8 +85,8 @@ export class GradingService {
         text_answer: a?.text_answer ?? null,
         answer_file: a?.file_path ? { name: a.file_name, answer_id: a.id } : null,
         score: a?.score ?? null,
-      };
-    });
+      });
+    }
 
     return {
       attempt: {
@@ -102,16 +105,16 @@ export class GradingService {
   }
 
   /** FR-4.10 — record manual scores; auto-transitions to graded when done. */
-  score(teacherId, attemptId, body) {
-    const t = this._attemptForTeacher(attemptId, teacherId);
+  async score(teacherId, attemptId, body) {
+    const t = await this._attemptForTeacher(attemptId, teacherId);
     if (t.status === 'in_progress') throw conflict('The student has not submitted this attempt yet.');
     if (t.status === 'released') throw conflict('This attempt has already been released to the student.');
     const scores = Array.isArray(body?.scores) ? body.scores : [];
     if (!scores.length) throw badRequest('Provide at least one score.');
 
-    const rows = this.db.prepare('SELECT a.*, q.points, q.type FROM answers a JOIN questions q ON q.id = a.question_id WHERE a.attempt_id = ?').all(attemptId);
+    const rows = await this.db.prepare('SELECT a.*, q.points, q.type FROM answers a JOIN questions q ON q.id = a.question_id WHERE a.attempt_id = ?').all(attemptId);
 
-    return this.db.transaction(() => {
+    return await this.db.transaction(async () => {
       const byId = new Map(rows.map((r) => [r.id, r]));
       for (const s of scores) {
         const row = byId.get(Number(s?.answer_id));
@@ -120,10 +123,10 @@ export class GradingService {
         if (!Number.isFinite(raw) || raw < 0 || raw > row.points) {
           throw badRequest(`Score for an answer must be between 0 and ${row.points} points.`);
         }
-        this.db.prepare('UPDATE answers SET score = ? WHERE id = ?').run(raw, row.id);
+        await this.db.prepare('UPDATE answers SET score = ? WHERE id = ?').run(raw, row.id);
       }
       // Recompute totals & completion
-      const fresh = this.db.prepare(`
+      const fresh = await this.db.prepare(`
         SELECT a.score, q.type, q.points FROM answers a JOIN questions q ON q.id = a.question_id
         WHERE a.attempt_id = ?
       `).all(attemptId);
@@ -136,7 +139,7 @@ export class GradingService {
         }
       }
       const graded = !docUnscored;
-      this.db.prepare(`
+      await this.db.prepare(`
         UPDATE attempts SET auto_score=?, manual_total=?, status=?, graded_at=? WHERE id=?
       `).run(auto, manual, graded ? 'graded' : t.status, graded ? nowIso() : t.graded_at, attemptId);
       return { ok: true, status: graded ? 'graded' : t.status,
@@ -145,23 +148,23 @@ export class GradingService {
   }
 
   /** FR-4.10 — release a graded/held result to the student. */
-  release(teacherId, attemptId) {
-    const t = this._attemptForTeacher(attemptId, teacherId);
+  async release(teacherId, attemptId) {
+    const t = await this._attemptForTeacher(attemptId, teacherId);
     if (t.status === 'released') throw conflict('This result has already been released.');
     if (t.status === 'in_progress') throw conflict('The student has not submitted this attempt yet.');
-    const hasDoc = this.db.prepare(`
+    const hasDoc = await this.db.prepare(`
       SELECT 1 FROM questions q WHERE q.quiz_id = ? AND q.type='doc' LIMIT 1
     `).get(t.quiz_id);
     if (hasDoc) {
-      const unscored = this.db.prepare(`
+      const unscored = await this.db.prepare(`
         SELECT COUNT(*) c FROM answers a JOIN questions q ON q.id = a.question_id
         WHERE a.attempt_id = ? AND q.type = 'doc' AND a.score IS NULL
-      `).get(attemptId).c;
-      if (unscored > 0) {
-        throw conflict(`Score all ${unscored} document answer(s) before releasing this result.`);
+      `).get(attemptId);
+      if (unscored.c > 0) {
+        throw conflict(`Score all ${unscored.c} document answer(s) before releasing this result.`);
       }
     }
-    this.db.prepare("UPDATE attempts SET status='released', released_at=? WHERE id=?")
+    await this.db.prepare("UPDATE attempts SET status='released', released_at=? WHERE id=?")
       .run(nowIso(), attemptId);
     return { ok: true };
   }

@@ -4,6 +4,11 @@ import { LEVELS } from '../config.js';
 
 export const nowIso = () => new Date().toISOString();
 
+/** Reads a header regardless of whether `req` is a Node IncomingMessage
+ *  (plain headers object) or a Fetch API Request (Headers, via .get()). */
+export const getHeader = (req, name) =>
+  typeof req.headers?.get === 'function' ? req.headers.get(name) : req.headers?.[name];
+
 export function reqString(value, field, { min = 1, max = 300 } = {}) {
   const v = typeof value === 'string' ? value.trim() : '';
   if (v.length < min) throw badRequest(`"${field}" is required.`);
