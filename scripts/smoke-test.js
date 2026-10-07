@@ -328,6 +328,7 @@ async function main() {
   const CF = process.env.CF === '1'; // Workers build: JSON dumps (no VACUUM INTO)
   r = await admin('GET', '/api/admin/backups');
   ok('backup config + history readable', r.status === 200 && r.data.config);
+  const priorBackupCfg = r.data.config; // restore after testing — never leave a schedule on
   r = await admin('PUT', '/api/admin/backups/config', { body: { enabled: true, frequency: 'daily', scope: 'accounts', format: CF ? 'json' : 'sqlite', retention: 5 } });
   ok('policy saved', r.status === 200 && r.data.config.scope === 'accounts');
   r = await admin('POST', '/api/admin/backups/run', { body: { scope: 'full', format: CF ? 'json' : 'sqlite' } });
@@ -342,6 +343,15 @@ async function main() {
            : dlBytes.subarray(0, 15).toString().startsWith('SQLite format 3')));
   r = await student('GET', `/api/admin/backups/${backupId}/download`);
   ok('students cannot download backups', r.status === 401 || r.status === 403);
+  // restore the pre-test policy (backups stay OFF unless the admin changed them)
+  await admin('PUT', '/api/admin/backups/config', { body: {
+    enabled: !!priorBackupCfg.enabled,
+    frequency: priorBackupCfg.frequency,
+    scope: priorBackupCfg.scope,
+    retention: priorBackupCfg.retention } });
+  const restored = (await admin('GET', '/api/admin/backups')).data.config;
+  ok('backup policy restored after tests (off unless admin enabled it)',
+    restored.enabled === !!priorBackupCfg.enabled && restored.frequency === priorBackupCfg.frequency);
 
   /* 16 · course deletion cascades for real */
   console.log('\n16 · Destructive integrity (FR-4.1)');

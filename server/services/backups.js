@@ -82,7 +82,7 @@ export class BackupEngine {
     const any = await this.db.prepare('SELECT 1 FROM backup_config').get();
     if (!any) {
       await this._cfgSet('enabled', '0');
-      await this._cfgSet('frequency', 'daily');
+      await this._cfgSet('frequency', 'off');
       await this._cfgSet('scope', 'full');
       await this._cfgSet('format', [...this.formats.keys()][0] ?? 'json');
       await this._cfgSet('retention', String(this.retentionDefault));
@@ -109,7 +109,7 @@ export class BackupEngine {
     const next = { ...cur };
     if (patch.enabled !== undefined) next.enabled = !!patch.enabled;
     if (patch.frequency !== undefined) {
-      if (!FREQUENCIES[patch.frequency]) throw badRequest('Unknown backup frequency.');
+      if (!(patch.frequency in FREQUENCIES)) throw badRequest('Unknown backup frequency.');
       next.frequency = patch.frequency;
     }
     if (patch.scope !== undefined) {
