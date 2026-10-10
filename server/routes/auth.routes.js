@@ -15,13 +15,16 @@ export function registerAuthRoutes(router, ctx) {
     if (!limiter.check(`login:${ip}:${ident}`)) {
       throw unauthorized('Too many sign-in attempts. Please wait a minute and try again.');
     }
+    // Students sign in with their Student ID (also accepts username/email);
+    // teachers/admins use username or email. Student IDs are case-insensitive.
     const user = await db.prepare(
-      'SELECT * FROM users WHERE (username = ? COLLATE NOCASE OR email = ? COLLATE NOCASE) LIMIT 1'
-    ).get(ident, ident);
+      `SELECT * FROM users WHERE (username = ? COLLATE NOCASE OR email = ? COLLATE NOCASE
+        OR student_id = ? COLLATE NOCASE) LIMIT 1`
+    ).get(ident, ident, ident.toUpperCase());
 
     const ok = user && verifyPassword(String(password ?? ''), user.password_hash);
     if (!ok || user.role !== role) {
-      throw unauthorized('Invalid credentials — check your username/email, password, and selected role.');
+      throw unauthorized('Invalid credentials — check your Student ID/username, password, and selected role.');
     }
     if (!user.is_active) {
       throw forbidden('This account has been deactivated. Please contact the administrator.');

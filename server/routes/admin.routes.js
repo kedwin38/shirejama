@@ -38,6 +38,13 @@ export function registerAdminRoutes(router, ctx) {
     return { user: await services.users.createStudent(c.body) };
   });
 
+  // Bulk provision: rows parsed client-side from CSV/XLSX ({name, student_id}),
+  // one academic level + one default password for the whole upload.
+  router.post('/api/admin/students/bulk', async (req, res, c) => {
+    admin(c);
+    return await services.users.bulkProvisionStudents(c.body ?? {});
+  });
+
   router.patch('/api/admin/users/:id', async (req, res, c) => {
     admin(c);
     return { user: await services.users.update(Number(c.params.id), c.body ?? {}) };

@@ -127,6 +127,64 @@ export class UserService {
     });
   }
 
+  /**
+   * Bulk provision — CSV/XLSX upload of {name, student_id} rows for ONE
+   * academic level with one shared default password (policy-checked).
+   * Emails are system-generated from the Student ID; usernames from the
+   * name. Existing/duplicate IDs are skipped with reasons, never fatal.
+   * Capped per request (the UI batches larger files).
+   */
+  async bulkProvisionStudents({ academic_level, password, rows }) {
+    const level = reqLevel(academic_level);
+    this._assertPassword(password);
+    if (!Array.isArray(rows) || rows.length === 0) throw badRequest('Provide at least one student row.');
+    if (rows.length > 150) throw badRequest('Bulk provision accepts up to 150 students per request — larger files are batched automatically.');
+
+    const created = [], skipped = [], invalid = [];
+    const seenIds = new Set();
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i] ?? {};
+      const name = typeof row.name === 'string' ? row.name.trim() : '';
+      const sid = typeof row.student_id === 'string'
+        ? row.student_id.trim().toUpperCase().replace(/\s+/g, '') : '';
+
+      if (name.length < 3 || name.length > 120) {
+        invalid.push({ row: i + 1, name, student_id: sid, reason: 'Name must be 3–120 characters.' });
+        continue;
+      }
+      if (sid.length < 3 || sid.length > 40 || sid.includes('@')) {
+        invalid.push({ row: i + 1, name, student_id: sid, reason: 'Student ID must be 3–40 letters/digits/hyphens.' });
+        continue;
+      }
+      if (seenIds.has(sid)) {
+        skipped.push({ student_id: sid, name, reason: 'Duplicate Student ID in this file.' });
+        continue;
+      }
+      seenIds.add(sid);
+      if (await this.db.prepare('SELECT 1 FROM users WHERE student_id = ?').get(sid)) {
+        skipped.push({ student_id: sid, name, reason: 'Student ID already exists.' });
+        continue;
+      }
+      const email = sid.toLowerCase().replace(/[^a-z0-9.-]+/g, '-') + '@students.shirejama.school';
+      if (await this.db.prepare('SELECT 1 FROM users WHERE email = ? COLLATE NOCASE').get(email)) {
+        skipped.push({ student_id: sid, name, reason: 'Generated email conflicts with an existing account.' });
+        continue;
+      }
+      const username = await generateUsername(this.db, name);
+      const now = nowIso();
+      await this.db.prepare(`
+        INSERT INTO users (role, full_name, username, email, password_hash, is_active, student_id, academic_level, created_at, updated_at)
+        VALUES ('student', ?, ?, ?, ?, 1, ?, ?, ?, ?)
+      `).run(name, username, email, hashPassword(password), sid, level, now, now);
+      created.push({ name, student_id: sid, username, email });
+    }
+    return {
+      created_count: created.length, skipped_count: skipped.length, invalid_count: invalid.length,
+      created, skipped, invalid,
+    };
+  }
+
   /** FR-3.4 / FR-3.5 — edit identity/role fields and activation. */
   async update(id, patch) {
     const user = await this._byId(id);

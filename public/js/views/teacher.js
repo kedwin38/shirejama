@@ -329,23 +329,55 @@ async function courseAnalytics(course) {
         .map((h) => el('th', {}, h)))),
     el('tbody', {}, quizRows));
 
-  // per-student table
-  const studentRows = students.map((s) => el('tr', {},
-    el('td', {}, el('b', {}, s.full_name),
-      el('div', { class: 'faint mono', style: 'font-size:11px' }, s.student_id || ''),
-      !s.is_active ? el('span', { class: 'chip danger' }, 'inactive') : null),
-    el('td', { class: 'mono' }, s.chapters_done + '/' + summary.chapters),
-    el('td', {}, el('div', { class: 'progressbar', style: 'width:90px' },
-      el('i', { style: 'width:' + Math.max(0, Math.min(100, s.completion_pct)) + '%' }))),
-    el('td', { class: 'mono' }, String(s.attempts)),
-    el('td', { class: 'mono' }, s.avg_score_pct == null ? '—' : s.avg_score_pct + '%'),
-    el('td', { class: 'faint', style: 'font-size:11.5px' },
-      s.last_activity ? fmtDateTime(s.last_activity) : '—')));
+  // per-student table — full cohort (completed or not), filterable by status
+  const statusOf = (s) => s.completion_pct >= 100 ? 'completed'
+    : (s.attempts > 0 || s.chapters_done > 0) ? 'progress' : 'not_started';
+  const statusCounts = {
+    all: students.length,
+    completed: students.filter((s) => statusOf(s) === 'completed').length,
+    progress: students.filter((s) => statusOf(s) === 'progress').length,
+    not_started: students.filter((s) => statusOf(s) === 'not_started').length,
+  };
+  const statusChip = (st) => ({
+    completed: el('span', { class: 'chip ok' }, 'Completed'),
+    progress: el('span', { class: 'chip warn' }, 'In progress'),
+    not_started: el('span', { class: 'chip neutral' }, 'Not started'),
+  }[st]);
+
+  const studentsBody = el('tbody');
+  const drawStudents = (filter) => {
+    studentsBody.replaceChildren(...students
+      .filter((s) => filter === 'all' || statusOf(s) === filter)
+      .map((s) => el('tr', {},
+        el('td', {}, el('b', {}, s.full_name),
+          el('div', { class: 'faint mono', style: 'font-size:11px' }, s.student_id || ''),
+          !s.is_active ? el('span', { class: 'chip danger' }, 'inactive') : null),
+        el('td', { class: 'mono' }, s.chapters_done + '/' + summary.chapters),
+        el('td', {}, el('div', { class: 'progressbar', style: 'width:90px' },
+          el('i', { style: 'width:' + Math.max(0, Math.min(100, s.completion_pct)) + '%' }))),
+        el('td', {}, statusChip(statusOf(s))),
+        el('td', { class: 'mono' }, String(s.attempts)),
+        el('td', { class: 'mono' }, s.avg_score_pct == null ? '—' : s.avg_score_pct + '%'),
+        el('td', { class: 'faint', style: 'font-size:11.5px' },
+          s.last_activity ? fmtDateTime(s.last_activity) : '—'))));
+  };
+  drawStudents('all');
   const studentTable = el('table', { class: 'tbl' },
     el('thead', {}, el('tr', {},
-      ['Student', 'Chapters done', 'Completion', 'Attempts', 'Avg score', 'Last activity']
+      ['Student', 'Chapters done', 'Completion', 'Status', 'Attempts', 'Avg score', 'Last activity']
         .map((h) => el('th', {}, h)))),
-    el('tbody', {}, studentRows));
+    studentsBody);
+
+  const studentsFilters = el('div', { class: 'tabs', style: 'margin-bottom:10px' },
+    [['all', 'All'], ['completed', 'Completed'], ['progress', 'In progress'], ['not_started', 'Not started']]
+      .map(([v, label], idx, arr) => el('button', {
+        class: 'tab' + (idx === 0 ? ' active' : ''),
+        onclick: (e) => {
+          [...e.currentTarget.parentNode.children].forEach((b) => b.classList.remove('active'));
+          e.currentTarget.classList.add('active');
+          drawStudents(v);
+        },
+      }, `${label} (${statusCounts[v]})`)));
 
   const bodyChildren = [
     el('div', { class: 'stat-grid mb-2' },
@@ -367,7 +399,9 @@ async function courseAnalytics(course) {
   }
   if (students.length > 0) {
     bodyChildren.push(el('div', {},
-      el('h3', { style: 'font-size:14px;margin-bottom:10px' }, 'Students'),
+      el('h3', { style: 'font-size:14px;margin-bottom:10px' },
+        'Students — everyone at this course\u2019s level(s), completed or not'),
+      studentsFilters,
       el('div', { class: 'table-wrap' }, studentTable)));
   }
 
@@ -382,8 +416,9 @@ async function courseAnalytics(course) {
       el('div', { class: 'modal-foot' },
         el('button', { class: 'btn ghost', onclick: () => {
           downloadCsv(`cohort-${c.id}.csv`,
-            ['Student', 'Student ID', 'Level', 'Chapters done', 'Completion %', 'Attempts', 'Avg score %', 'Last activity'],
+            ['Student', 'Student ID', 'Level', 'Status', 'Chapters done', 'Completion %', 'Attempts', 'Avg score %', 'Last activity'],
             students.map((s) => [s.full_name, s.student_id, s.academic_level,
+              statusOf(s) === 'completed' ? 'Completed' : statusOf(s) === 'progress' ? 'In progress' : 'Not started',
               `${s.chapters_done}/${summary.chapters}`, s.completion_pct,
               s.attempts, s.avg_score_pct ?? '', s.last_activity ?? '']));
           toast('Cohort CSV exported.', 'ok', 2500);

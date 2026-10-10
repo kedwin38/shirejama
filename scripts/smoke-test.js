@@ -91,6 +91,33 @@ async function main() {
   ok('student registered, STD id auto-generated', r.status === 200 && /^STD-\d{4}-\d+$/.test(r.data.user?.student_id || ''));
   const studentId = r.data.user.id;
   const studentUsername = r.data.user.username;
+  const studentSid = r.data.user.student_id;
+
+  /* 3b · bulk provision + Student-ID sign-in */
+  console.log('\n3b · Bulk provision & Student-ID login');
+  r = await admin('POST', '/api/admin/students/bulk', { body: {
+    academic_level: 'C3', password: 'weak' , rows: [{ name: 'Nope McShort', student_id: 'BULK-001' }] } });
+  ok('bulk rejects weak default password', r.status === 422 && r.data.error?.code === 'weak_password');
+  r = await admin('POST', '/api/admin/students/bulk', { body: {
+    academic_level: 'C3', password: 'Bulk@2026',
+    rows: [
+      { name: 'Bulk Student One', student_id: 'bulk-9001' },          // lower-case → normalized
+      { name: 'Bulk Student Two', student_id: 'BULK-9002' },
+      { name: 'Bulk Student One', student_id: 'BULK-9001' },          // duplicate in file
+      { name: 'Existing Holder', student_id: studentSid },            // already exists
+      { name: 'X', student_id: 'BULK-9003' },                          // invalid name
+    ] } });
+  const bulk = r.data;
+  ok('bulk provisions valid rows', r.status === 200 && bulk.created_count === 2
+    && bulk.created.some((u) => u.student_id === 'BULK-9001'));
+  ok('bulk skips duplicates (in-file + existing)', bulk.skipped_count === 2);
+  ok('bulk reports invalid rows without failing', bulk.invalid_count === 1);
+  r = await call('bulkst', 'POST', '/api/auth/login', { body: { role: 'student', identifier: 'bulk-9001', password: 'Bulk@2026' } });
+  ok('student signs in with Student ID (case-insensitive)', r.status === 200 && r.data.user?.student_id === 'BULK-9001');
+  r = await call('bulkst', 'POST', '/api/auth/login', { body: { role: 'teacher', identifier: 'BULK-9001', password: 'Bulk@2026' } });
+  ok('Student ID cannot cross roles', r.status === 401);
+  r = await admin('GET', '/api/admin/users?role=student&q=BULK-9002');
+  ok('bulk students listed with level', r.data.users.length === 1 && r.data.users[0].academic_level === 'C3');
 
   r = await call('teacher', 'POST', '/api/auth/login', { body: { role: 'teacher', identifier: teacherUsername, password: 'Teacher@2026' } });
   ok('new teacher can sign in immediately', r.status === 200);

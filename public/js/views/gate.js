@@ -22,7 +22,7 @@ export function renderGate(app, onAuthed) {
       el('div', { class: 'rc-desc' }, r.desc),
     )));
 
-  const identifier = el('input', { class: 'input', placeholder: 'e.g. amina.yusuf or name@school.org', autocomplete: 'username', 'aria-label': 'Username or email' });
+  const identifier = el('input', { class: 'input', placeholder: 'e.g. amina.yusuf or name@school.org', autocomplete: 'username', 'aria-label': 'Student ID, username, or email' });
   const password = el('input', { class: 'input', type: 'password', placeholder: 'Your password', autocomplete: 'current-password', 'aria-label': 'Password' });
   const errLine = el('div', { class: 'err-line', role: 'alert' });
   const submitBtn = el('button', { class: 'btn primary lg', style: 'width:100%', type: 'submit', disabled: true },
@@ -73,6 +73,11 @@ export function renderGate(app, onAuthed) {
       card.classList.toggle('selected', on);
       card.setAttribute('aria-checked', on ? 'true' : 'false');
     }
+    identifier.placeholder = id === 'student'
+      ? 'Your Student ID (e.g. STD-2026-1001)'
+      : 'e.g. hodan.abdi or name@school.org';
+    identifier.closest('.field').querySelector('label').textContent = id === 'student'
+      ? 'STUDENT ID (OR USERNAME)' : 'USERNAME OR EMAIL';
     submitBtn.disabled = false;
     identifier.focus();
   }

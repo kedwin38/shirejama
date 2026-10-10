@@ -2,6 +2,7 @@
 import { api } from '../lib/api.js';
 import { el, icons, toast, confirmDialog, openModal, closeModal,
          fmtDate, fmtBytes, fmtDateTime, LEVEL_LABELS, passwordProblems, downloadCsv } from '../lib/ui.js';
+import { parseStudentsFile } from '../lib/student-import.js';
 
 export const ADMIN_NAV = [
   { label: 'Overview', path: '/admin', icon: 'grid' },
@@ -238,10 +239,144 @@ function renderProvision(main) {
     el('div', { class: 'page-head' },
       el('div', {},
         el('div', { class: 'eyebrow' }, 'Create Institutional Access'),
-        el('h1', {}, 'Provision Account'),
-        el('div', { class: 'head-sub' }, 'New accounts sign in immediately with the temporary password you set.'))),
+        el('h1', {}, 'Provision Accounts'),
+        el('div', { class: 'head-sub' }, 'New accounts sign in immediately — students use their Student ID to sign in.'))),
     el('div', { class: 'grid-2' }, teacherForm(), studentForm()),
+    el('div', { class: 'mt-2' }, bulkStudentForm()),
   );
+}
+
+/* ── Bulk provision: CSV/XLSX (Name, Student_ID) for one academic level ── */
+function bulkStudentForm() {
+  const BATCH = 100;
+  let parsed = null; // { rows, invalid }
+
+  const level = el('select', { class: 'select' },
+    el('option', { value: '' }, 'Academic level for this file…'),
+    LEVELS.map((l) => el('option', { value: l }, LEVEL_LABELS[l])));
+  let pwOk = false;
+  const pw = pwField((ok) => { pwOk = ok; updateBtn(); });
+
+  const fileInput = el('input', { type: 'file', accept: '.csv,.xlsx,.xls,text/csv', style: 'display:none' });
+  const drop = el('div', { class: 'dropzone', tabindex: '0', role: 'button',
+    onclick: () => fileInput.click(),
+    onkeydown: (e) => { if (e.key === 'Enter') fileInput.click(); } },
+    icons.upload(),
+    el('div', {}, el('b', {}, 'Upload student list — CSV or XLSX'),
+      el('div', { class: 'hint' }, 'Two columns: Name, Student_ID (a header row is fine; up to 5000 rows)')));
+  ['dragover', 'dragenter'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add('over'); }));
+  ['dragleave', 'drop'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove('over'); }));
+  drop.addEventListener('drop', (e) => { if (e.dataTransfer.files[0]) readFile(e.dataTransfer.files[0]); });
+
+  const preview = el('div');
+  const err = el('div', { class: 'err-line' });
+  const createBtn = el('button', { class: 'btn primary mt-1', disabled: true, onclick: runProvision },
+    el('span', { class: 'ic' }, icons.userPlus()), 'Create accounts');
+
+  async function readFile(file) {
+    err.textContent = ''; preview.replaceChildren(); parsed = null; updateBtn();
+    try {
+      const isX = /\.xlsx$/i.test(file.name);
+      const result = isX
+        ? await parseStudentsFile({ name: file.name, buffer: await file.arrayBuffer() })
+        : await parseStudentsFile({ name: file.name, text: await file.text() });
+      parsed = result;
+      drawPreview();
+    } catch (e) {
+      err.textContent = e.message || 'Could not read the file.';
+    }
+  }
+
+  function drawPreview() {
+    const { rows, invalid } = parsed;
+    const shown = rows.slice(0, 6);
+    preview.replaceChildren(
+      el('div', { class: 'chip ok mt-1' }, icons.checkCircle(),
+        ` ${rows.length} student${rows.length === 1 ? '' : 's'} ready`),
+      invalid.length > 0 && el('div', { class: 'chip warn' }, `${invalid.length} row(s) will be skipped (invalid)`),
+      el('div', { class: 'table-wrap mt-1', style: 'box-shadow:none;max-height:220px;overflow:auto' },
+        el('table', { class: 'tbl' },
+          el('thead', {}, el('tr', {}, ['Name', 'Student ID'].map((h) => el('th', {}, h)))),
+          el('tbody', {}, [
+            ...shown.map((r) => el('tr', {},
+              el('td', {}, r.name), el('td', { class: 'mono' }, r.student_id))),
+            rows.length > shown.length && el('tr', {}, el('td', { class: 'faint', colspan: '2' },
+              `… ${rows.length - shown.length} more`)),
+            ...invalid.slice(0, 3).map((r) => el('tr', { style: 'opacity:.6' },
+              el('td', {}, r.name || '—'), el('td', { class: 'mono' }, r.student_id || '—'),
+              el('td', { class: 'faint' }, r.reason))),
+          ].filter(Boolean)))),
+      invalid.length > 0 && el('div', { class: 'hint' },
+        invalid.slice(0, 4).map((r) => `Row ${r.row}: ${r.reason}`).join(' · ')));
+    updateBtn();
+  }
+
+  function updateBtn() {
+    const ready = parsed && parsed.rows.length > 0 && pwOk && level.value;
+    createBtn.disabled = !ready;
+    createBtn.replaceChildren(el('span', { class: 'ic' }, icons.userPlus()),
+      ready ? `Create ${parsed.rows.length} student accounts` : 'Create accounts');
+  }
+  level.addEventListener('change', updateBtn);
+
+  async function runProvision() {
+    err.textContent = '';
+    createBtn.disabled = true;
+    createBtn.textContent = 'Creating…';
+    const all = { created: [], skipped: [], invalid: [...(parsed.invalid ?? [])] };
+    try {
+      for (let i = 0; i < parsed.rows.length; i += BATCH) {
+        const batch = parsed.rows.slice(i, i + BATCH);
+        const r = await api.post('/api/admin/students/bulk', {
+          academic_level: level.value, password: pw.querySelector('input').value, rows: batch });
+        all.created.push(...r.created); all.skipped.push(...r.skipped); all.invalid.push(...r.invalid);
+      }
+      const { created, skipped, invalid } = all;
+      preview.replaceChildren(
+        el('div', { class: 'row wrap mt-1' },
+          el('span', { class: 'chip ok' }, icons.checkCircle(), ` ${created.length} created`),
+          skipped.length > 0 && el('span', { class: 'chip warn' }, `${skipped.length} skipped`),
+          invalid.length > 0 && el('span', { class: 'chip danger' }, `${invalid.length} invalid rows`)),
+        created.length > 0 && el('div', { class: 'table-wrap mt-1', style: 'box-shadow:none;max-height:260px;overflow:auto' },
+          el('table', { class: 'tbl' },
+            el('thead', {}, el('tr', {}, ['Student', 'Student ID (sign-in)', 'Username'].map((h) => el('th', {}, h)))),
+            el('tbody', {}, created.slice(0, 50).map((u) => el('tr', {},
+              el('td', {}, u.name),
+              el('td', { class: 'mono' }, u.student_id),
+              el('td', { class: 'mono faint' }, u.username)))))),
+        skipped.length > 0 && el('div', { class: 'hint mt-1' },
+          'Skipped: ' + skipped.slice(0, 6).map((s) => `${s.student_id} — ${s.reason}`).join(' · ')
+          + (skipped.length > 6 ? ` … +${skipped.length - 6} more` : '')),
+        el('div', { class: 'row mt-1 no-print' },
+          el('button', { class: 'btn ghost sm', onclick: () => {
+            downloadCsv('bulk-provisioned.csv', ['Name', 'Student ID', 'Username', 'Email'],
+              created.map((u) => [u.name, u.student_id, u.username, u.email]));
+          } }, el('span', { class: 'ic' }, icons.download()), 'Export created accounts'),
+          el('button', { class: 'btn ghost sm', onclick: () => {
+            downloadCsv('bulk-skipped.csv', ['Student ID', 'Name', 'Reason'],
+              skipped.map((s) => [s.student_id, s.name, s.reason]));
+          } }, el('span', { class: 'ic' }, icons.download()), 'Export skipped')));
+      toast(`${created.length} student accounts created.`, 'ok', 5000);
+      parsed = null; fileInput.value = ''; updateBtn();
+    } catch (e) {
+      err.textContent = e.details?.length ? `${e.message} (needs ${e.details.join(', ')})` : e.message;
+      createBtn.disabled = false; updateBtn();
+    }
+  }
+
+  fileInput.addEventListener('change', () => fileInput.files[0] && readFile(fileInput.files[0]));
+
+  return el('div', { class: 'card frame' }, el('div', { class: 'card-pad' },
+    el('div', { class: 'card-title-row' },
+      el('span', { class: 'ic', style: 'color:var(--gold-600)' }, icons.users()),
+      el('h3', {}, 'Bulk Provision Students'),
+      el('span', { class: 'sub' }, 'CSV / XLSX — one academic level per file')),
+    el('div', { class: 'form-grid' },
+      el('div', { class: 'field' }, el('label', {}, 'ACADEMIC LEVEL ', el('span', { class: 'req' }, '*')), level,
+        el('div', { class: 'hint' }, 'Every account in the file gets this level.')),
+      el('div', { class: 'field' }, el('label', {}, 'DEFAULT PASSWORD FOR ALL ', el('span', { class: 'req' }, '*')), pw)),
+    drop, fileInput, preview, err, createBtn,
+  ));
 }
 
 function pwField(onValid) {
@@ -315,8 +450,8 @@ function studentForm() {
           password: pw.querySelector('input').value,
         });
         result.replaceChildren(el('div', { class: 'chip ok mt-1' }, icons.checkCircle(),
-          ` Created — username `, el('b', { class: 'mono' }, user.username),
-          ' · ID ', el('b', { class: 'mono' }, user.student_id)));
+          ` Created — the student signs in with ID `, el('b', { class: 'mono' }, user.student_id),
+          ' · username ', el('b', { class: 'mono' }, user.username)));
         name.value = email.value = ''; level.value = '';
         toast('Student account registered.', 'ok');
       } catch (e) { err.textContent = e.details?.length ? `${e.message} (needs ${e.details.join(', ')})` : e.message; }
