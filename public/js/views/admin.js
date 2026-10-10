@@ -264,6 +264,16 @@ function bulkStudentForm() {
     icons.upload(),
     el('div', {}, el('b', {}, 'Upload student list — CSV or XLSX'),
       el('div', { class: 'hint' }, 'Two columns: Name, Student_ID (a header row is fine; up to 5000 rows)')));
+  const templateBtn = el('button', { class: 'btn ghost sm', title: 'Download a ready-to-fill CSV template',
+    onclick: () => {
+      downloadCsv('student-list-template.csv',
+        ['Name', 'Student_ID'],
+        [
+          ['Amina Yusuf', 'ADM-2026-0601'],
+          ['Botan Ahmed', 'ADM-2026-0602'],
+        ]);
+      toast('Template downloaded — replace the example rows with your students.', 'info', 4500);
+    } }, el('span', { class: 'ic' }, icons.download()), 'CSV template');
   ['dragover', 'dragenter'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add('over'); }));
   ['dragleave', 'drop'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove('over'); }));
   drop.addEventListener('drop', (e) => { if (e.dataTransfer.files[0]) readFile(e.dataTransfer.files[0]); });
@@ -375,7 +385,10 @@ function bulkStudentForm() {
       el('div', { class: 'field' }, el('label', {}, 'ACADEMIC LEVEL ', el('span', { class: 'req' }, '*')), level,
         el('div', { class: 'hint' }, 'Every account in the file gets this level.')),
       el('div', { class: 'field' }, el('label', {}, 'DEFAULT PASSWORD FOR ALL ', el('span', { class: 'req' }, '*')), pw)),
-    drop, fileInput, preview, err, createBtn,
+    el('div', { class: 'row mt-1 mb-1', style: 'align-items:flex-start' },
+      el('div', { style: 'flex:1;min-width:0' }, drop),
+      templateBtn),
+    fileInput, preview, err, createBtn,
   ));
 }
 

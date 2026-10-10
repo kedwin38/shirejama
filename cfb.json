@@ -1,0 +1,1 @@
+{"created_count":1,"skipped_count":1,"invalid_count":0,"created":[{"name":"Cloud Bulk Test","student_id":"CF-BULK-777","username":"cloud.bulk.test","email":"cf-bulk-777@students.shirejama.school"}],"skipped":[{"student_id":"CF-BULK-777","name":"Cloud Bulk Test","reason":"Duplicate Student ID in this file."}],"invalid":[]}
