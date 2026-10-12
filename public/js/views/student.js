@@ -109,14 +109,35 @@ async function renderCourse(main, courseId) {
     el('div', { class: 'row wrap mb-2' },
       el('span', { class: 'chip neutral' }, `with ${course.teacher_name}`),
       course.levels.map((l) => el('span', { class: 'chip gold mono' }, LEVEL_LABELS[l]))),
+    course.resource_url && el('a', {
+      class: 'btn gold-ghost mb-2', href: course.resource_url, target: '_blank', rel: 'noopener',
+      style: 'display:inline-flex',
+    }, el('span', { class: 'ic' }, icons.grid()), 'Open the course learning material ↗'),
     ...(chapters.length === 0
       ? [el('div', { class: 'card frame' }, el('div', { class: 'empty' }, el('div', { class: 'e-ico' }, icons.layers()),
-          el('h4', {}, 'Chapters coming soon'), el('p', {}, 'Your teacher is still preparing this course.')))]
+          el('h4', {}, 'Chapters coming soon'), el('p', {}, 'Your teacher is still preparing this course.'))]
       : chapterNodes),
   );
 }
 
 function materialRow(m) {
+  // External learning-material link (media hosted elsewhere) — opens directly.
+  if (m.kind === 'link') {
+    let host = m.link_url || '';
+    try { host = new URL(m.link_url).hostname; } catch {}
+    return el('div', { class: 'res-row' },
+      el('div', { class: 'rr-ico' }, icons.grid()),
+      el('div', { class: 'rr-main' },
+        el('div', { class: 'rr-title' }, m.title),
+        el('div', { class: 'rr-sub' },
+          el('span', {}, 'External resource'),
+          el('span', { class: 'mono' }, host),
+          m.description && el('span', {}, m.description))),
+      el('div', { class: 'rr-actions' },
+        el('a', { class: 'btn sm primary', href: m.link_url, target: '_blank', rel: 'noopener' },
+          el('span', { class: 'ic' }, icons.play()), 'Open ↗')));
+  }
+
   const isVideo = m.kind === 'video';
   const posKey = `sj-video-pos-${m.id}`;
   const openIt = () => openTheater((card, close) => {
