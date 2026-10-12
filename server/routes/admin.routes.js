@@ -39,7 +39,8 @@ export function registerAdminRoutes(router, ctx) {
   });
 
   // Bulk provision: rows parsed client-side from CSV/XLSX ({name, student_id}),
-  // one academic level + one default password for the whole upload.
+  // one academic level + one default password for the whole upload. Students
+  // whose ID already has an account are skipped and reported.
   router.post('/api/admin/students/bulk', async (req, res, c) => {
     admin(c);
     return await services.users.bulkProvisionStudents(c.body ?? {});
@@ -60,7 +61,7 @@ export function registerAdminRoutes(router, ctx) {
     return await services.users.delete(Number(c.params.id));
   });
 
-  // ── Backup console (FR-7) ──────────────────────────────────────────────
+  // ── Backup console (FR-7) — admin-connected S3-compatible storage ─────
   router.get('/api/admin/backups', async (req, res, c) => {
     admin(c);
     return { config: await services.backups.config(), history: await services.backups.history() };
@@ -71,11 +72,15 @@ export function registerAdminRoutes(router, ctx) {
     return { config: await services.backups.updateConfig(c.body ?? {}) };
   });
 
+  // Verify the connection: writes + removes a probe object in the bucket.
+  router.post('/api/admin/backups/test', async (req, res, c) => {
+    admin(c);
+    return await services.backups.testConnection();
+  });
+
   router.post('/api/admin/backups/run', async (req, res, c) => {
     admin(c);
-    const rec = await services.backups.run({
-      scope: c.body?.scope, format: c.body?.format,
-    });
+    const rec = await services.backups.run({ scope: c.body?.scope });
     return { backup: { id: rec.id, file_name: rec.file_name, scope: rec.scope,
                        format: rec.format, size_bytes: rec.size_bytes,
                        status: rec.status, created_at: rec.created_at } };
@@ -83,11 +88,14 @@ export function registerAdminRoutes(router, ctx) {
 
   router.get('/api/admin/backups/:id/download', async (req, res, c) => {
     admin(c);
-    const row = await services.backups.download(Number(c.params.id));
-    return await ctx.serveFile(req, res, {
-      path: row.stored_path,
-      mime: row.format === 'sqlite' ? 'application/x-sqlite3' : 'application/json',
-      fileName: row.file_name, size: row.size_bytes, download: true,
+    const { row, bytes } = await services.backups.download(Number(c.params.id));
+    return new Response(bytes, {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Content-Disposition': `attachment; filename="${row.file_name.replace(/["\\\r\n]/g, '_')}"`,
+        'X-Content-Type-Options': 'nosniff',
+      },
     });
   });
 
