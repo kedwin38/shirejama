@@ -68,6 +68,13 @@ export function registerTeacherRoutes(router, ctx) {
     return { material };
   });
 
+  // External learning-material link (media hosted elsewhere) — JSON body.
+  router.post('/api/teacher/chapters/:id/materials/link', async (req, res, c) => {
+    teacher(c);
+    return { material: await services.courses.addMaterialLink(
+      c.user.id, Number(c.params.id), c.body ?? {}) };
+  });
+
   router.delete('/api/teacher/materials/:id', async (req, res, c) => {
     teacher(c);
     return await services.courses.deleteMaterial(c.user.id, Number(c.params.id));
