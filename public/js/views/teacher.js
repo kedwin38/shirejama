@@ -782,7 +782,7 @@ async function renderSubmissions(main) {
               el('td', { class: 'mono' }, s.score != null ? `${s.score} / ${s.max_score}` : '—'),
               statusChip(s),
               el('td', {}, el('button', { class: 'btn sm ghost', onclick: () => gradingDrawer(s) }, 'Review answers')),
-            ))))))))));
+            )))))))))));
   };
   const statusChip = (s) => {
     const m = {

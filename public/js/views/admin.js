@@ -594,8 +594,9 @@ async function renderBackups(main) {
           el('div', { class: 'row' }, el('span', { class: 'ic', style: 'color:var(--gold-600)' }, icons.archive()),
             el('b', {}, 'Backup history'),
             el('span', { class: 'spacer' }),
-            el('span', { class: 'hint' }, 'stored in your connected bucket'))),
+            el('span', { class: 'hint' }, 'stored in your connected bucket')),
         histWrap)),
+      )),
   );
   drawHistory(history);
 }

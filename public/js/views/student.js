@@ -115,7 +115,7 @@ async function renderCourse(main, courseId) {
     }, el('span', { class: 'ic' }, icons.grid()), 'Open the course learning material ↗'),
     ...(chapters.length === 0
       ? [el('div', { class: 'card frame' }, el('div', { class: 'empty' }, el('div', { class: 'e-ico' }, icons.layers()),
-          el('h4', {}, 'Chapters coming soon'), el('p', {}, 'Your teacher is still preparing this course.'))]
+          el('h4', {}, 'Chapters coming soon'), el('p', {}, 'Your teacher is still preparing this course.')))]
       : chapterNodes),
   );
 }
