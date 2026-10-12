@@ -1,4 +1,10 @@
 -- Shire Jama LMS · schema (idempotent; see docs/03_DATA_MODEL.md)
+-- NOTE: users.email is NULLABLE — students have NO email (they sign in with
+-- their Student ID); teachers/admins still require one.
+-- materials supports kind='link' with link_url (external learning resources).
+-- courses.resource_url is an optional course-level external material link.
+-- Existing databases are upgraded by server/core/migrate.js — this file is
+-- the fresh-install shape.
 PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS users (
@@ -6,7 +12,7 @@ CREATE TABLE IF NOT EXISTS users (
   role           TEXT NOT NULL CHECK (role IN ('admin','teacher','student')),
   full_name      TEXT NOT NULL,
   username       TEXT NOT NULL UNIQUE COLLATE NOCASE,
-  email          TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  email          TEXT UNIQUE COLLATE NOCASE,
   password_hash  TEXT NOT NULL,
   is_active      INTEGER NOT NULL DEFAULT 1,
   instructor_code TEXT UNIQUE,
@@ -32,12 +38,13 @@ CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_exp  ON sessions(expires_at);
 
 CREATE TABLE IF NOT EXISTS courses (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  teacher_id  INTEGER NOT NULL REFERENCES users(id),
-  title       TEXT NOT NULL,
-  description TEXT NOT NULL DEFAULT '',
-  created_at  TEXT NOT NULL,
-  updated_at  TEXT NOT NULL
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  teacher_id   INTEGER NOT NULL REFERENCES users(id),
+  title        TEXT NOT NULL,
+  description  TEXT NOT NULL DEFAULT '',
+  resource_url TEXT,
+  created_at   TEXT NOT NULL,
+  updated_at   TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_courses_teacher ON courses(teacher_id);
 
@@ -59,14 +66,15 @@ CREATE INDEX IF NOT EXISTS idx_chapters_course ON chapters(course_id, position);
 CREATE TABLE IF NOT EXISTS materials (
   id             INTEGER PRIMARY KEY AUTOINCREMENT,
   chapter_id     INTEGER NOT NULL REFERENCES chapters(id) ON DELETE CASCADE,
-  kind           TEXT NOT NULL CHECK (kind IN ('pdf','video')),
+  kind           TEXT NOT NULL CHECK (kind IN ('pdf','video','link')),
   title          TEXT NOT NULL,
   description    TEXT NOT NULL DEFAULT '',
-  file_name      TEXT NOT NULL,
-  stored_path    TEXT NOT NULL,
-  mime           TEXT NOT NULL,
-  size_bytes     INTEGER NOT NULL,
+  file_name      TEXT NOT NULL DEFAULT '',
+  stored_path    TEXT,
+  mime           TEXT NOT NULL DEFAULT '',
+  size_bytes     INTEGER NOT NULL DEFAULT 0,
   allow_download INTEGER NOT NULL DEFAULT 0,
+  link_url       TEXT,
   created_at     TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_materials_chapter ON materials(chapter_id);
