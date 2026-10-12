@@ -74,6 +74,7 @@ function createCourse(main) {
   openModal((card, done) => {
     const title = el('input', { class: 'input', placeholder: 'e.g. English Foundations: Reading & Writing', 'data-autofocus': true });
     const desc = el('textarea', { class: 'input', placeholder: 'What will learners gain from this course?' });
+    const res = el('input', { class: 'input mono', placeholder: 'https://… (optional — for media hosted elsewhere)', value: '' });
     const levels = levelPickerV2();
     const err = el('div', { class: 'err-line' });
     card.append(
@@ -82,6 +83,8 @@ function createCourse(main) {
       el('div', { class: 'modal-body' },
         el('div', { class: 'field' }, el('label', {}, 'TITLE ', el('span', { class: 'req' }, '*')), title),
         el('div', { class: 'field' }, el('label', {}, 'DESCRIPTION'), desc),
+        el('div', { class: 'field' }, el('label', {}, 'LEARNING MATERIAL LINK (OPTIONAL)'), res,
+          el('div', { class: 'hint' }, 'Where students access the material if it is hosted elsewhere (Google Drive, YouTube, a school portal…).')),
         el('div', { class: 'field' }, el('label', {}, 'ACADEMIC LEVELS ', el('span', { class: 'req' }, '*')), levels.node,
           el('div', { class: 'hint' }, 'Only students at these levels will see the course.')),
         err),
@@ -90,7 +93,9 @@ function createCourse(main) {
         el('button', { class: 'btn primary', onclick: async () => {
           err.textContent = '';
           try {
-            const { course } = await api.post('/api/teacher/courses', { title: title.value, description: desc.value, levels: levels.value() });
+            const { course } = await api.post('/api/teacher/courses', {
+              title: title.value, description: desc.value,
+              resource_url: res.value || undefined, levels: levels.value() });
             toast('Course created.', 'ok'); done();
             location.hash = `#/teacher/courses/${course.id}`;
           } catch (e) { err.textContent = e.message; }
@@ -116,7 +121,8 @@ async function renderStudio(main, courseId) {
         el('button', { class: 'btn danger-ghost', onclick: () => deleteCourse(course) }, el('span', { class: 'ic' }, icons.trash()), 'Delete course'))),
     el('div', { class: 'row wrap mb-2' },
       course.levels.map((l) => el('span', { class: 'chip gold mono' }, LEVEL_LABELS[l])),
-      el('span', { class: 'chip neutral' }, `${course.chapters.length} chapters`)),
+      el('span', { class: 'chip neutral' }, `${course.chapters.length} chapters`),
+      course.resource_url && el('a', { class: 'chip info', href: course.resource_url, target: '_blank', rel: 'noopener' }, 'material link ↗')),
     el('div', { id: 'chapter-list' }, chaptersHtml),
     el('div', { class: 'mt-2' },
       el('button', { class: 'btn', onclick: () => addChapter(course) }, el('span', { class: 'ic' }, icons.plus()), 'Add chapter')),
@@ -126,10 +132,26 @@ async function renderStudio(main, courseId) {
 function chapterBlock(course, h) {
   const body = el('div', { class: 'chapter-body' });
   const draw = () => {
-    body.replaceChildren(
-      el('div', { class: 'list-note' }, 'MATERIALS'),
-      h.materials.length === 0 && el('div', { class: 'list-note faint' }, 'No materials yet.'),
-      ...h.materials.map((m) => el('div', { class: 'res-row' + (m.kind === 'video' ? ' rr-video' : '') },
+    const matRow = (m) => {
+      if (m.kind === 'link') {
+        return el('div', { class: 'res-row' },
+          el('div', { class: 'rr-ico' }, icons.grid()),
+          el('div', { class: 'rr-main' },
+            el('div', { class: 'rr-title' }, m.title),
+            el('div', { class: 'rr-sub' },
+              el('span', { class: 'mono' }, m.link_url),
+              m.description && el('span', {}, m.description))),
+          el('div', { class: 'rr-actions' },
+            el('span', { class: 'chip info' }, 'external link'),
+            el('a', { class: 'icon-btn', href: m.link_url, target: '_blank', rel: 'noopener', title: 'Open link' }, icons.eye()),
+            el('button', { class: 'icon-btn', title: 'Delete material', style: 'color:var(--danger)', onclick: async () => {
+              const ok = await confirmDialog({ title: 'Delete link material?', body: `“${m.title}” will be removed.`, danger: true, confirmLabel: 'Delete' });
+              if (!ok) return;
+              await api.delete(`/api/teacher/materials/${m.id}`); toast('Material deleted.', 'ok');
+              document.dispatchEvent(new CustomEvent('reload-view'));
+            } }, icons.trash())));
+      }
+      return el('div', { class: 'res-row' + (m.kind === 'video' ? ' rr-video' : '') },
         el('div', { class: 'rr-ico' }, m.kind === 'video' ? icons.video() : icons.pdf()),
         el('div', { class: 'rr-main' },
           el('div', { class: 'rr-title' }, m.title),
@@ -143,9 +165,15 @@ function chapterBlock(course, h) {
             if (!ok) return;
             await api.delete(`/api/teacher/materials/${m.id}`); toast('Material deleted.', 'ok');
             document.dispatchEvent(new CustomEvent('reload-view'));
-          } }, icons.trash())))),
+          } }, icons.trash())));
+    };
+    body.replaceChildren(
+      el('div', { class: 'list-note' }, 'MATERIALS'),
+      h.materials.length === 0 && el('div', { class: 'list-note faint' }, 'No materials yet.'),
+      ...h.materials.map(matRow),
       el('div', { class: 'row mt-1 mb-2' },
-        el('button', { class: 'btn ghost sm', onclick: () => uploadMaterial(course, h) }, el('span', { class: 'ic' }, icons.upload()), 'Upload PDF / video')),
+        el('button', { class: 'btn ghost sm', onclick: () => uploadMaterial(course, h) }, el('span', { class: 'ic' }, icons.upload()), 'Add material'),
+        el('button', { class: 'btn ghost sm', onclick: () => addLinkMaterial(course, h) }, el('span', { class: 'ic' }, icons.grid()), 'Add external link')),
       el('div', { class: 'list-note' }, 'QUIZZES'),
       h.quizzes.length === 0 && el('div', { class: 'list-note faint' }, 'No quizzes yet.'),
       ...h.quizzes.map((z) => quizBlock(course, h, z)),
@@ -191,7 +219,7 @@ function quizBlock(course, h, z) {
       z.opens_at ? `opens ${fmtDateTime(z.opens_at)} ` : 'always open · ',
       z.closes_at ? `closes ${fmtDateTime(z.closes_at)}` : 'no close',
       z.instructions && el('span', { class: 'muted' }, ` · “${z.instructions.slice(0, 80)}${z.instructions.length > 80 ? '…' : ''}”`)),
-    z.questions.length > 0 && el('div', { class: 'mt-2' }, z.questions.map((q) => el('div', { class: 'opt-row' + (q.type === 'mc' ? '' : ''), style: 'align-items:flex-start' },
+    z.questions.length > 0 && el('div', { class: 'mt-2' }, z.questions.map((q) => el('div', { class: 'opt-row', style: 'align-items:flex-start' },
       el('span', { class: 'q-type-badge ' + q.type }, q.type === 'mc' ? 'MULTIPLE CHOICE' : 'DOCUMENT'),
       el('div', { style: 'flex:1' },
         el('div', { style: 'font-size:13px' }, q.prompt.length > 120 ? q.prompt.slice(0, 120) + '…' : q.prompt),
@@ -261,6 +289,7 @@ function editCourse(course) {
     const title = el('input', { class: 'input', value: course.title });
     const desc = el('textarea', { class: 'input' }, course.description || '');
     desc.value = course.description || '';
+    const res = el('input', { class: 'input mono', placeholder: 'https://… (optional)', value: course.resource_url || '' });
     const levels = levelPickerV2(course.levels);
     const err = el('div', { class: 'err-line' });
     card.append(
@@ -268,12 +297,14 @@ function editCourse(course) {
       el('div', { class: 'modal-body' },
         el('div', { class: 'field' }, el('label', {}, 'TITLE'), title),
         el('div', { class: 'field' }, el('label', {}, 'DESCRIPTION'), desc),
+        el('div', { class: 'field' }, el('label', {}, 'LEARNING MATERIAL LINK (OPTIONAL)'), res),
         el('div', { class: 'field' }, el('label', {}, 'ACADEMIC LEVELS'), levels.node), err),
       el('div', { class: 'modal-foot' },
         el('button', { class: 'btn ghost', onclick: done }, 'Cancel'),
         el('button', { class: 'btn primary', onclick: async () => {
           try {
-            await api.patch(`/api/teacher/courses/${course.id}`, { title: title.value, description: desc.value, levels: levels.value() });
+            await api.patch(`/api/teacher/courses/${course.id}`, {
+              title: title.value, description: desc.value, resource_url: res.value, levels: levels.value() });
             toast('Course updated.', 'ok'); done(); document.dispatchEvent(new CustomEvent('reload-view'));
           } catch (e) { err.textContent = e.message; }
         } }, 'Save changes')),
@@ -313,7 +344,6 @@ async function courseAnalytics(course) {
       el('div', { class: 's-value' }, String(value)),
       el('div', { class: 's-foot' }, foot));
 
-  // quiz outcomes table
   const quizRows = quizzes.map((z) => el('tr', {},
     el('td', {}, el('b', { style: 'font-weight:600' }, z.title)),
     el('td', { class: 'mono' }, String(z.question_count)),
@@ -329,7 +359,6 @@ async function courseAnalytics(course) {
         .map((h) => el('th', {}, h)))),
     el('tbody', {}, quizRows));
 
-  // per-student table — full cohort (completed or not), filterable by status
   const statusOf = (s) => s.completion_pct >= 100 ? 'completed'
     : (s.attempts > 0 || s.chapters_done > 0) ? 'progress' : 'not_started';
   const statusCounts = {
@@ -370,7 +399,7 @@ async function courseAnalytics(course) {
 
   const studentsFilters = el('div', { class: 'tabs', style: 'margin-bottom:10px' },
     [['all', 'All'], ['completed', 'Completed'], ['progress', 'In progress'], ['not_started', 'Not started']]
-      .map(([v, label], idx, arr) => el('button', {
+      .map(([v, label], idx) => el('button', {
         class: 'tab' + (idx === 0 ? ' active' : ''),
         onclick: (e) => {
           [...e.currentTarget.parentNode.children].forEach((b) => b.classList.remove('active'));
@@ -471,7 +500,7 @@ function uploadMaterial(course, h) {
         el('button', { class: 'btn ghost', onclick: done }, 'Cancel'),
         el('button', { class: 'btn primary', 'data-autofocus': true, onclick: async (e) => {
           err.textContent = '';
-          if (!file) { err.textContent = 'Choose a file first.'; return; }
+          if (!file) { err.textContent = 'Choose a file first — or use “Add external link” for media hosted elsewhere.'; return; }
           if (!title.value.trim()) { err.textContent = 'Give the material a title.'; return; }
           const btn = e.currentTarget; btn.disabled = true;
           bar.style.display = 'block';
@@ -494,6 +523,38 @@ function uploadMaterial(course, h) {
             err.textContent = ue.message; btn.disabled = false; bar.style.display = 'none';
           }
         } }, el('span', { class: 'ic' }, icons.upload()), 'Upload')),
+    );
+  });
+}
+
+/* ── External link material (media hosted elsewhere) ───────────────────── */
+function addLinkMaterial(course, h) {
+  openModal((card, done) => {
+    const title = el('input', { class: 'input', placeholder: 'e.g. Lecture playlist (YouTube)', 'data-autofocus': true });
+    const url = el('input', { class: 'input mono', placeholder: 'https://…' });
+    const desc = el('input', { class: 'input', placeholder: 'Optional description' });
+    const err = el('div', { class: 'err-line' });
+    card.append(
+      el('div', { class: 'modal-head' }, el('h3', {}, 'Add External Link'), el('button', { class: 'icon-btn x', onclick: done }, icons.x())),
+      el('div', { class: 'modal-body' },
+        el('div', { class: 'gate-note mb-2' }, 'For learning material hosted outside the LMS (YouTube, Google Drive, a school portal). Students open it directly — nothing is uploaded here.'),
+        el('div', { class: 'field' }, el('label', {}, 'TITLE ', el('span', { class: 'req' }, '*')), title),
+        el('div', { class: 'field' }, el('label', {}, 'LINK (HTTP/HTTPS) ', el('span', { class: 'req' }, '*')), url),
+        el('div', { class: 'field' }, el('label', {}, 'DESCRIPTION'), desc),
+        err),
+      el('div', { class: 'modal-foot' },
+        el('button', { class: 'btn ghost', onclick: done }, 'Cancel'),
+        el('button', { class: 'btn primary', onclick: async () => {
+          err.textContent = '';
+          if (!title.value.trim()) { err.textContent = 'Give the link a title.'; return; }
+          try { new URL(url.value); } catch { err.textContent = 'Enter a valid http(s) URL.'; return; }
+          try {
+            await api.post(`/api/teacher/chapters/${h.id}/materials/link`, {
+              title: title.value, url: url.value, description: desc.value });
+            toast('External link added.', 'ok'); done();
+            document.dispatchEvent(new CustomEvent('reload-view'));
+          } catch (e) { err.textContent = e.message; }
+        } }, el('span', { class: 'ic' }, icons.grid()), 'Add link')),
     );
   });
 }
@@ -558,7 +619,6 @@ function questionDialog(course, quiz) {
     const prompt = el('textarea', { class: 'input', placeholder: 'The question prompt…', style: 'min-height:90px' });
     const points = el('input', { class: 'input mono', type: 'number', min: '1', max: '100', value: '1' });
 
-    // MC option editor
     const opts = el('div');
     const optRow = (label = '', correct = false) => {
       const radio = el('input', { type: 'radio', name: 'qz-correct', checked: correct, title: 'Mark this option as the correct answer' });
@@ -572,7 +632,6 @@ function questionDialog(course, quiz) {
     const resetOpts = () => opts.replaceChildren(optRow('', true), optRow());
     resetOpts();
 
-    // attachments
     let imageToken = null, attachToken = null, attachName = null;
     const imgStatus = el('div', { class: 'hint mt-1' });
     const imgInput = el('input', { type: 'file', accept: 'image/png,image/jpeg,image/gif,image/webp', style: 'display:none' });
@@ -585,15 +644,15 @@ function questionDialog(course, quiz) {
         imageToken = r.token; imgStatus.textContent = `Image attached: ${r.file_name} ✓`; imgStatus.style.color = 'var(--ok)';
       } catch (e) { imgStatus.textContent = e.message; imgStatus.style.color = 'var(--danger)'; }
     });
+    const attachStatus = el('div', { class: 'hint mt-1' });
     attachInput.addEventListener('change', async () => {
       const f = attachInput.files[0]; if (!f) return;
-      const st = attachStatus; st.textContent = `Uploading ${f.name}…`;
+      attachStatus.textContent = `Uploading ${f.name}…`;
       try {
         const r = await uploadWithProgress({ url: `/api/teacher/files/question?kind=attachment&name=${encodeURIComponent(f.name)}`, body: f });
-        attachToken = r.token; attachName = r.file_name; st.textContent = `Attached: ${r.file_name} ✓`; st.style.color = 'var(--ok)';
-      } catch (e) { st.textContent = e.message; st.style.color = 'var(--danger)'; }
+        attachToken = r.token; attachName = r.file_name; attachStatus.textContent = `Attached: ${r.file_name} ✓`; attachStatus.style.color = 'var(--ok)';
+      } catch (e) { attachStatus.textContent = e.message; attachStatus.style.color = 'var(--danger)'; }
     });
-    const attachStatus = el('div', { class: 'hint mt-1' });
 
     const mcExtras = el('div', {},
       el('div', { class: 'field' }, el('label', {}, 'ANSWER OPTIONS — TICK THE CORRECT ONE'),
@@ -666,9 +725,6 @@ async function renderSubmissions(main) {
       return;
     }
 
-    // Group attempts per student (independently), and within each student
-    // sort by course — courses ordered by most recent activity, attempts
-    // within a course newest-first.
     const byStudent = new Map();
     for (const s of rows) {
       if (!byStudent.has(s.student_id)) byStudent.set(s.student_id, []);
@@ -697,7 +753,7 @@ async function renderSubmissions(main) {
           pending: attempts.filter((a) => a.status === 'submitted').length,
         };
       })
-      .sort((a, b) => (b.pending - a.pending) || a.name.localeCompare(b.name)); // needs-grading first, then A→Z
+      .sort((a, b) => (b.pending - a.pending) || a.name.localeCompare(b.name));
 
     wrap.replaceChildren(...groups.map((g) => el('div', { class: 'card frame mb-2' },
       el('div', { class: 'card-pad', style: 'padding-bottom:10px' },
@@ -726,7 +782,7 @@ async function renderSubmissions(main) {
               el('td', { class: 'mono' }, s.score != null ? `${s.score} / ${s.max_score}` : '—'),
               statusChip(s),
               el('td', {}, el('button', { class: 'btn sm ghost', onclick: () => gradingDrawer(s) }, 'Review answers')),
-            )))))))))));
+            ))))))))));
   };
   const statusChip = (s) => {
     const m = {
@@ -767,7 +823,7 @@ async function gradingDrawer(s) {
   const data = await api.get(`/api/teacher/attempts/${s.id}`);
   const { attempt, quiz, course, student, items } = data;
   openModal((card, done) => {
-    const scores = new Map(); // answer_id -> input
+    const scores = new Map();
     const err = el('div', { class: 'err-line' });
 
     const itemNodes = items.map((q, idx) => {
@@ -793,8 +849,8 @@ async function gradingDrawer(s) {
             el('span', { class: 'ic' }, icons.eye()), 'Question image')),
         el('div', { class: 'gi-prompt' }, `${idx + 1}. ${q.prompt}`),
         q.type === 'mc' && q.options && el('div', { class: 'mb-2' }, q.options.map((o) =>
-          el('div', { class: 'opt-row' + (o.is_correct ? ' correct' : '') + (o.id === q.chosen_option_id ? '' : '') ,
-            style: (o.id === q.chosen_option_id ? 'border-left:3px solid var(--gold-600);' : '') + (o.is_correct ? '' : '') },
+          el('div', { class: 'opt-row' + (o.is_correct ? ' correct' : ''),
+            style: o.id === q.chosen_option_id ? 'border-left:3px solid var(--gold-600);' : '' },
             el('span', { class: 'mono faint', style: 'font-size:11px' }, o.id === q.chosen_option_id ? '▸ student' : o.is_correct ? '✓ correct' : ''),
             el('span', {}, o.label),
             o.is_correct && el('span', { class: 'chip ok', style: 'margin-left:auto' }, 'answer')))),
