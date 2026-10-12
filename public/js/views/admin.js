@@ -52,7 +52,7 @@ async function renderOverview(main) {
           '• Students never self-register — every account is provisioned from ', el('b', {}, 'Provision Access'), '.'),
         el('div', { class: 'list-note' }, '• Teachers who still own courses cannot be deleted — deactivate or reassign first.'),
         el('div', { class: 'list-note' }, '• All uploaded files are served through permission-checked endpoints, never public URLs.'),
-        el('div', { class: 'list-note' }, '• Configure automated account/result backups from the ', el('b', {}, 'Backup Console'), '.'),
+        el('div', { class: 'list-note' }, '• Backups go to the cloud storage you connect in the ', el('b', {}, 'Backup Console'), '.'),
       )),
   );
 }
@@ -76,7 +76,7 @@ async function renderAccounts(main) {
   }
 
   function drawTable(users) {
-    const head = { teacher: ['Instructor', 'Code', 'Email', 'Courses', 'Status', ''], student: ['Student', 'ID', 'Email', 'Level', 'Status', ''], admin: ['Administrator', 'Username', 'Email', '', 'Status', ''] }[role];
+    const head = { teacher: ['Instructor', 'Code', 'Email', 'Courses', 'Status', ''], student: ['Student', 'ID', 'Username', 'Level', 'Status', ''], admin: ['Administrator', 'Username', 'Email', '', 'Status', ''] }[role];
     tblWrap.replaceChildren(
       users.length === 0 ? el('div', { class: 'empty' }, el('div', { class: 'e-ico' }, icons.search()),
         el('h4', {}, 'No accounts found'), el('p', {}, 'Try a different search or role tab.')) :
@@ -86,7 +86,7 @@ async function renderAccounts(main) {
           el('td', {}, el('b', {}, u.full_name), el('div', { class: 'faint mono', style: 'font-size:11px' }, u.username)),
           role === 'admin' ? el('td', { class: 'mono' }, u.username)
             : el('td', {}, el('span', { class: 'chip gold mono' }, role === 'teacher' ? (u.instructor_code || '—') : (u.student_id || '—'))),
-          el('td', {}, u.email),
+          el('td', {}, u.email || '—'),
           role === 'teacher' ? el('td', {}, String(u.course_count)) :
             role === 'student' ? el('td', {}, LEVEL_LABELS[u.academic_level] || '—') : el('td', {}, ''),
           statusChip(u),
@@ -121,7 +121,7 @@ async function renderAccounts(main) {
       el('button', { class: 'btn ghost sm', title: 'Export the current list as a spreadsheet', onclick: () => {
         downloadCsv(`accounts-${role}.csv`,
           ['Name', 'Username', 'Email', role === 'teacher' ? 'Instructor code' : 'Student ID', 'Level', 'Courses', 'Status', 'Created'],
-          lastUsers.map((u) => [u.full_name, u.username, u.email,
+          lastUsers.map((u) => [u.full_name, u.username, u.email ?? '',
             role === 'teacher' ? (u.instructor_code ?? '') : (u.student_id ?? ''),
             u.academic_level ?? '', u.course_count ?? '', u.is_active ? 'active' : 'inactive', u.created_at]));
         toast(`accounts-${role}.csv exported.`, 'ok', 2500);
@@ -148,7 +148,7 @@ function editUser(u) {
   openModal((card, done) => {
     const name = el('input', { class: 'input', value: u.full_name });
     const username = el('input', { class: 'input', value: u.username });
-    const email = el('input', { class: 'input', value: u.email });
+    const email = el('input', { class: 'input', value: u.email || '', placeholder: u.role === 'student' ? 'Students have no email' : 'name@shirejama.school' });
     const err = el('div', { class: 'err-line' });
     const roleField = u.role === 'teacher'
       ? el('div', { class: 'field' }, el('label', {}, 'INSTRUCTOR CODE'), code = el('input', { class: 'input mono', value: u.instructor_code || '' }))
@@ -164,7 +164,7 @@ function editUser(u) {
       el('div', { class: 'modal-body' },
         el('div', { class: 'field' }, el('label', {}, 'FULL NAME'), name),
         el('div', { class: 'field' }, el('label', {}, 'USERNAME'), username),
-        el('div', { class: 'field' }, el('label', {}, 'EMAIL'), email),
+        u.role !== 'student' && el('div', { class: 'field' }, el('label', {}, 'EMAIL'), email),
         roleField,
         levelSel && el('div', { class: 'field' }, el('label', {}, 'ACADEMIC LEVEL'), levelSel),
         err,
@@ -173,7 +173,9 @@ function editUser(u) {
         el('button', { class: 'btn ghost', onclick: done }, 'Cancel'),
         el('button', { class: 'btn primary', onclick: async () => {
           err.textContent = '';
-          const patch = { full_name: name.value, username: username.value, email: email.value };
+          const patch = { full_name: name.value, username: username.value };
+          if (u.role !== 'student') patch.email = email.value;
+          else patch.email = ''; // clear/keep students email-free
           if (u.role === 'teacher' && code?.value) patch.instructor_code = code.value;
           if (u.role === 'student') {
             if (sid?.value) patch.student_id = sid.value;
@@ -240,7 +242,7 @@ function renderProvision(main) {
       el('div', {},
         el('div', { class: 'eyebrow' }, 'Create Institutional Access'),
         el('h1', {}, 'Provision Accounts'),
-        el('div', { class: 'head-sub' }, 'New accounts sign in immediately — students use their Student ID to sign in.'))),
+        el('div', { class: 'head-sub' }, 'New accounts sign in immediately — students sign in with their Student ID and password.'))),
     el('div', { class: 'grid-2' }, teacherForm(), studentForm()),
     el('div', { class: 'mt-2' }, bulkStudentForm()),
   );
@@ -263,7 +265,7 @@ function bulkStudentForm() {
     onkeydown: (e) => { if (e.key === 'Enter') fileInput.click(); } },
     icons.upload(),
     el('div', {}, el('b', {}, 'Upload student list — CSV or XLSX'),
-      el('div', { class: 'hint' }, 'Two columns: Name, Student_ID (a header row is fine; up to 5000 rows)')));
+      el('div', { class: 'hint' }, 'Two columns: Name, Student_ID. Students who already have accounts are skipped and reported.')));
   const templateBtn = el('button', { class: 'btn ghost sm', title: 'Download a ready-to-fill CSV template',
     onclick: () => {
       downloadCsv('student-list-template.csv',
@@ -345,7 +347,7 @@ function bulkStudentForm() {
       preview.replaceChildren(
         el('div', { class: 'row wrap mt-1' },
           el('span', { class: 'chip ok' }, icons.checkCircle(), ` ${created.length} created`),
-          skipped.length > 0 && el('span', { class: 'chip warn' }, `${skipped.length} skipped`),
+          skipped.length > 0 && el('span', { class: 'chip warn' }, `${skipped.length} already have accounts — skipped`),
           invalid.length > 0 && el('span', { class: 'chip danger' }, `${invalid.length} invalid rows`)),
         created.length > 0 && el('div', { class: 'table-wrap mt-1', style: 'box-shadow:none;max-height:260px;overflow:auto' },
           el('table', { class: 'tbl' },
@@ -355,18 +357,18 @@ function bulkStudentForm() {
               el('td', { class: 'mono' }, u.student_id),
               el('td', { class: 'mono faint' }, u.username)))))),
         skipped.length > 0 && el('div', { class: 'hint mt-1' },
-          'Skipped: ' + skipped.slice(0, 6).map((s) => `${s.student_id} — ${s.reason}`).join(' · ')
+          'Already have accounts: ' + skipped.slice(0, 6).map((s) => `${s.student_id} (${s.name})`).join(' · ')
           + (skipped.length > 6 ? ` … +${skipped.length - 6} more` : '')),
         el('div', { class: 'row mt-1 no-print' },
           el('button', { class: 'btn ghost sm', onclick: () => {
-            downloadCsv('bulk-provisioned.csv', ['Name', 'Student ID', 'Username', 'Email'],
-              created.map((u) => [u.name, u.student_id, u.username, u.email]));
+            downloadCsv('bulk-provisioned.csv', ['Name', 'Student ID', 'Username'],
+              created.map((u) => [u.name, u.student_id, u.username]));
           } }, el('span', { class: 'ic' }, icons.download()), 'Export created accounts'),
           el('button', { class: 'btn ghost sm', onclick: () => {
             downloadCsv('bulk-skipped.csv', ['Student ID', 'Name', 'Reason'],
               skipped.map((s) => [s.student_id, s.name, s.reason]));
           } }, el('span', { class: 'ic' }, icons.download()), 'Export skipped')));
-      toast(`${created.length} student accounts created.`, 'ok', 5000);
+      toast(`${created.length} student accounts created${skipped.length ? ` · ${skipped.length} already existed (skipped)` : ''}.`, 'ok', 5000);
       parsed = null; fileInput.value = ''; updateBtn();
     } catch (e) {
       err.textContent = e.details?.length ? `${e.message} (needs ${e.details.join(', ')})` : e.message;
@@ -438,7 +440,7 @@ function teacherForm() {
 
 function studentForm() {
   const name = el('input', { class: 'input', placeholder: 'Full name' });
-  const email = el('input', { class: 'input', placeholder: 'name@shirejama.school' });
+  const sid = el('input', { class: 'input mono', placeholder: 'Leave blank to auto-generate (STD-…)' });
   const level = el('select', { class: 'select' },
     el('option', { value: '' }, 'Select academic level…'),
     LEVELS.map((l) => el('option', { value: l }, LEVEL_LABELS[l])));
@@ -449,7 +451,8 @@ function studentForm() {
   return el('div', { class: 'card frame' }, el('div', { class: 'card-pad' },
     el('div', { class: 'card-title-row' }, el('span', { class: 'ic', style: 'color:var(--gold-600)' }, icons.award()), el('h3', {}, 'Student Account'), el('span', { class: 'sub' }, 'learner')),
     el('div', { class: 'field' }, el('label', {}, 'FULL NAME ', el('span', { class: 'req' }, '*')), name),
-    el('div', { class: 'field' }, el('label', {}, 'EMAIL ', el('span', { class: 'req' }, '*')), email),
+    el('div', { class: 'field' }, el('label', {}, 'STUDENT ID (OPTIONAL)'), sid,
+      el('div', { class: 'hint' }, 'The student signs in with this ID. Blank = auto-generate.')),
     el('div', { class: 'field' }, el('label', {}, 'ACADEMIC LEVEL ', el('span', { class: 'req' }, '*')), level,
       el('div', { class: 'hint' }, 'Determines which courses the student sees.')),
     pw, err, result,
@@ -459,41 +462,41 @@ function studentForm() {
       if (!pwOk) { err.textContent = 'Set a policy-compliant temporary password first.'; return; }
       try {
         const { user } = await api.post('/api/admin/students', {
-          full_name: name.value, email: email.value, academic_level: level.value,
+          full_name: name.value, student_id: sid.value || undefined, academic_level: level.value,
           password: pw.querySelector('input').value,
         });
         result.replaceChildren(el('div', { class: 'chip ok mt-1' }, icons.checkCircle(),
           ` Created — the student signs in with ID `, el('b', { class: 'mono' }, user.student_id),
-          ' · username ', el('b', { class: 'mono' }, user.username)));
-        name.value = email.value = ''; level.value = '';
+          ' · password ', el('b', { class: 'mono' }, 'the one you set')));
+        name.value = sid.value = ''; level.value = '';
         toast('Student account registered.', 'ok');
       } catch (e) { err.textContent = e.details?.length ? `${e.message} (needs ${e.details.join(', ')})` : e.message; }
     } }, el('span', { class: 'ic' }, icons.userPlus()), 'Register student'),
   ));
 }
 
-/* ── Backup Console (FR-7) ─────────────────────────────────────────────── */
+/* ── Backup Console — admin-connected S3-compatible cloud storage ─────── */
 async function renderBackups(main) {
   const { config, history } = await api.get('/api/admin/backups');
   const histWrap = el('div');
   const cfg = { ...config };
+  const s3 = config.s3;
 
   const drawHistory = (rows) => {
     histWrap.replaceChildren(rows.length === 0
       ? el('div', { class: 'empty' }, el('div', { class: 'e-ico' }, icons.archive()),
-        el('h4', {}, 'No backups yet'), el('p', {}, 'Run your first backup or enable the schedule.'))
+        el('h4', {}, 'No backups yet'), el('p', {}, 'Connect your storage, then run a backup or enable the schedule.'))
       : el('div', { class: 'table-wrap' }, el('table', { class: 'tbl' },
-        el('thead', {}, el('tr', {}, ['File', 'Scope', 'Format', 'Size', 'Taken', ''].map((h) => el('th', {}, h)))),
+        el('thead', {}, el('tr', {}, ['File', 'Scope', 'Size', 'Taken', ''].map((h) => el('th', {}, h)))),
         el('tbody', {}, rows.map((b) => el('tr', {},
           el('td', { class: 'mono', style: 'font-size:11.5px' }, b.file_name),
           el('td', {}, el('span', { class: 'chip neutral' }, scopeLabel(b.scope))),
-          el('td', {}, el('span', { class: 'chip gold' }, b.format === 'sqlite' ? 'SQLite snapshot' : 'JSON dump')),
           el('td', { class: 'mono' }, fmtBytes(b.size_bytes)),
           el('td', {}, fmtDateTime(b.created_at)),
           el('td', {}, el('div', { class: 'row-actions' },
             el('a', { class: 'icon-btn', href: `/api/admin/backups/${b.id}/download`, title: 'Download', download: b.file_name }, icons.download()),
             el('button', { class: 'icon-btn', title: 'Delete backup', style: 'color:var(--danger)', onclick: async () => {
-              const ok = await confirmDialog({ title: 'Delete this backup?', body: `“${b.file_name}” will be removed from storage.`, danger: true, confirmLabel: 'Delete' });
+              const ok = await confirmDialog({ title: 'Delete this backup?', body: `“${b.file_name}” will be removed from your cloud storage.`, danger: true, confirmLabel: 'Delete' });
               if (!ok) return;
               await api.delete(`/api/admin/backups/${b.id}`); toast('Backup deleted.', 'ok');
               renderBackups(main);
@@ -509,6 +512,14 @@ async function renderBackups(main) {
     return wrap;
   };
 
+  // connection form (secret masked once saved)
+  const endpoint = el('input', { class: 'input mono', placeholder: 'https://s3.amazonaws.com or https://nyc3.digitaloceanspaces.com', value: s3?.endpoint || '' });
+  const region = el('input', { class: 'input mono', placeholder: 'auto', value: s3?.region || 'auto' });
+  const bucket = el('input', { class: 'input mono', placeholder: 'your-bucket-name', value: s3?.bucket || '' });
+  const accessKey = el('input', { class: 'input mono', placeholder: 'Access key ID', value: s3?.access_key_id || '' });
+  const secret = el('input', { class: 'input mono', type: 'password', placeholder: s3 ? '******** (saved — leave as is)' : 'Secret access key' });
+  const prefix = el('input', { class: 'input mono', placeholder: 'shirejama-backups (optional folder)', value: s3?.prefix || '' });
+
   const enabledToggle = el('input', { type: 'checkbox', checked: cfg.enabled });
   const retention = el('input', { class: 'input mono', type: 'number', min: '1', max: '200', value: cfg.retention });
 
@@ -517,42 +528,73 @@ async function renderBackups(main) {
       el('div', {},
         el('div', { class: 'eyebrow' }, 'Data Protection'),
         el('h1', {}, 'Backup Console'),
-        el('div', { class: 'head-sub' }, 'Configure what is backed up, how, and how often — accounts, results, or the whole institution database.'))),
+        el('div', { class: 'head-sub' }, 'Connect any S3-compatible cloud storage once — full system details (accounts, marks, progress) are backed up there automatically. Media files are never included.'))),
     el('div', { class: 'bk-grid' },
       el('div', { class: 'card frame' }, el('div', { class: 'card-pad' },
-        el('h3', { class: 'mb-2' }, 'Policy'),
-        el('label', { class: 'check' }, enabledToggle,
-          el('span', {}, el('b', {}, 'Automatic schedule'), el('div', { class: 'hint' }, 'Runs in the background while school is live.'))),
-        el('div', { class: 'field mt-2' }, el('label', {}, 'FREQUENCY'),
-          seg([{ label: 'Off', value: 'off' }, { label: 'Every 6h', value: '6h' }, { label: 'Daily', value: 'daily' }, { label: 'Weekly', value: 'weekly' }], 'frequency')),
-        el('div', { class: 'field' }, el('label', {}, 'SCOPE'),
-          seg([{ label: 'Accounts', value: 'accounts' }, { label: 'Results', value: 'results' }, { label: 'Everything', value: 'full' }], 'scope')),
-        el('div', { class: 'hint', style: 'margin:-6px 0 14px' },
-          'Accounts = all logins & profiles · Results = attempts, answers & progress · Everything = the complete academic database.'),
-        el('div', { class: 'field' }, el('label', {}, 'FORMAT'),
-          seg([{ label: 'SQLite snapshot', value: 'sqlite' }, { label: 'JSON dump', value: 'json' }], 'format')),
-        el('div', { class: 'field' }, el('label', {}, 'KEEP LAST'), retention, el('div', { class: 'hint' }, 'Older backups are pruned automatically.')),
-        el('div', { class: 'row mt-2' },
-          el('button', { class: 'btn primary', onclick: async () => {
-            try {
-              await api.put('/api/admin/backups/config', { enabled: enabledToggle.checked, frequency: cfg.frequency, scope: cfg.scope, format: cfg.format, retention: Number(retention.value) });
-              toast('Backup policy saved.', 'ok');
-            } catch (e) { toast(e.message, 'err'); }
-          } }, el('span', { class: 'ic' }, icons.settings()), 'Save policy'),
-          el('button', { class: 'btn', onclick: async (e) => {
+        el('div', { class: 'card-title-row' },
+          el('span', { class: 'ic', style: 'color:var(--gold-600)' }, icons.database()),
+          el('h3', {}, 'Cloud Storage Connection'),
+          s3 && el('span', { class: 'chip ok' }, 'connected')),
+        el('div', { class: 'field' }, el('label', {}, 'S3 ENDPOINT'), endpoint,
+          el('div', { class: 'hint' }, 'Works with Amazon S3, Cloudflare R2, DigitalOcean Spaces, Backblaze B2, Wasabi, MinIO…')),
+        el('div', { class: 'form-grid' },
+          el('div', { class: 'field' }, el('label', {}, 'REGION'), region),
+          el('div', { class: 'field' }, el('label', {}, 'BUCKET'), bucket)),
+        el('div', { class: 'form-grid' },
+          el('div', { class: 'field' }, el('label', {}, 'ACCESS KEY ID'), accessKey),
+          el('div', { class: 'field' }, el('label', {}, 'SECRET ACCESS KEY'), secret)),
+        el('div', { class: 'field' }, el('label', {}, 'PATH PREFIX (OPTIONAL)'), prefix),
+        el('div', { class: 'row mt-1' },
+          el('button', { class: 'btn primary', onclick: async (e) => {
             e.currentTarget.disabled = true;
-            try { const { backup } = await api.post('/api/admin/backups/run', { scope: cfg.scope, format: cfg.format }); toast(`Backup created (${fmtBytes(backup.size_bytes)}).`, 'ok'); renderBackups(main); }
-            catch (err2) { toast(err2.message, 'err'); e.currentTarget.disabled = false; }
-          } }, el('span', { class: 'ic' }, icons.refresh()), 'Backup now')),
-        cfg.last_run && el('div', { class: 'hint mt-2' }, 'Last automatic run: ', fmtDateTime(cfg.last_run),
-          cfg.next_run && el('span', {}, ` · next: ${fmtDateTime(cfg.next_run)}`)),
+            try {
+              await api.put('/api/admin/backups/config', { s3: {
+                endpoint: endpoint.value, region: region.value, bucket: bucket.value,
+                access_key_id: accessKey.value, secret_access_key: secret.value,
+                prefix: prefix.value } });
+              toast('Storage connection saved.', 'ok'); renderBackups(main);
+            } catch (err2) { toast(err2.message, 'err'); e.currentTarget.disabled = false; }
+          } }, el('span', { class: 'ic' }, icons.settings()), 'Save connection'),
+          el('button', { class: 'btn', onclick: async (e) => {
+            e.currentTarget.disabled = true; e.currentTarget.textContent = 'Testing…';
+            try { const r = await api.post('/api/admin/backups/test'); toast(r.message || 'Connected.', 'ok', 5000); }
+            catch (err2) { toast(err2.message, 'err', 7000); }
+            e.currentTarget.disabled = false;
+            e.currentTarget.replaceChildren(el('span', { class: 'ic' }, icons.shield()), 'Test connection');
+          } }, el('span', { class: 'ic' }, icons.shield()), 'Test connection')),
       )),
       el('div', {},
+        el('div', { class: 'card frame mb-2' }, el('div', { class: 'card-pad' },
+          el('h3', { class: 'mb-2' }, 'Schedule'),
+          el('label', { class: 'check' }, enabledToggle,
+            el('span', {}, el('b', {}, 'Automatic backups'), el('div', { class: 'hint' }, 'Off by default — runs only after you enable it.'))),
+          el('div', { class: 'field mt-2' }, el('label', {}, 'FREQUENCY'),
+            seg([{ label: 'Off', value: 'off' }, { label: 'Every 6h', value: '6h' }, { label: 'Daily', value: 'daily' }, { label: 'Weekly', value: 'weekly' }], 'frequency')),
+          el('div', { class: 'field' }, el('label', {}, 'SCOPE'),
+            seg([{ label: 'Accounts', value: 'accounts' }, { label: 'Results', value: 'results' }, { label: 'Everything', value: 'full' }], 'scope')),
+          el('div', { class: 'hint', style: 'margin:-6px 0 14px' },
+            'Accounts = logins & profiles · Results = marks, attempts & progress · Everything = the complete system data.'),
+          el('div', { class: 'field' }, el('label', {}, 'KEEP LAST'), retention, el('div', { class: 'hint' }, 'Older backups are removed from your bucket automatically.')),
+          el('div', { class: 'row mt-2' },
+            el('button', { class: 'btn primary', onclick: async () => {
+              try {
+                await api.put('/api/admin/backups/config', { enabled: enabledToggle.checked, frequency: cfg.frequency, scope: cfg.scope, retention: Number(retention.value) });
+                toast('Schedule saved.', 'ok');
+              } catch (e) { toast(e.message, 'err'); }
+            } }, el('span', { class: 'ic' }, icons.settings()), 'Save schedule'),
+            el('button', { class: 'btn', onclick: async (e) => {
+              e.currentTarget.disabled = true;
+              try { const { backup } = await api.post('/api/admin/backups/run', { scope: cfg.scope }); toast(`Backup uploaded to your cloud storage (${fmtBytes(backup.size_bytes)}).`, 'ok', 5000); renderBackups(main); }
+              catch (err2) { toast(err2.message, 'err', 7000); e.currentTarget.disabled = false; }
+            } }, el('span', { class: 'ic' }, icons.refresh()), 'Backup now')),
+          cfg.last_run && el('div', { class: 'hint mt-2' }, 'Last run: ', fmtDateTime(cfg.last_run),
+            cfg.next_run && el('span', {}, ` · next: ${fmtDateTime(cfg.next_run)}`)),
+        )),
         el('div', { class: 'card mb-2' }, el('div', { class: 'card-pad', style: 'padding:14px 18px' },
-          el('div', { class: 'row' }, el('span', { class: 'ic', style: 'color:var(--gold-600)' }, icons.database()),
+          el('div', { class: 'row' }, el('span', { class: 'ic', style: 'color:var(--gold-600)' }, icons.archive()),
             el('b', {}, 'Backup history'),
             el('span', { class: 'spacer' }),
-            el('span', { class: 'hint' }, 'files are downloadable and copy-ready for off-site storage')))),
+            el('span', { class: 'hint' }, 'stored in your connected bucket'))),
         histWrap)),
   );
   drawHistory(history);
