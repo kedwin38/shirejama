@@ -52,7 +52,7 @@ async function renderOverview(main) {
           '• Students never self-register — every account is provisioned from ', el('b', {}, 'Provision Access'), '.'),
         el('div', { class: 'list-note' }, '• Teachers who still own courses cannot be deleted — deactivate or reassign first.'),
         el('div', { class: 'list-note' }, '• All uploaded files are served through permission-checked endpoints, never public URLs.'),
-        el('div', { class: 'list-note' }, '• Backups go to the cloud storage you connect in the ', el('b', {}, 'Backup Console'), '.'),
+        el('div', { class: 'list-note' }, '• Backups go to the cloud storage you connect in ', el('b', {}, 'Backup Console'), '.'),
       )),
   );
 }
@@ -286,7 +286,11 @@ function bulkStudentForm() {
     el('span', { class: 'ic' }, icons.userPlus()), 'Create accounts');
 
   async function readFile(file) {
-    err.textContent = ''; preview.replaceChildren(); parsed = null; updateBtn();
+    err.textContent = ''; parsed = null; updateBtn();
+    preview.replaceChildren(
+      el('div', { class: 'upbar', style: 'display:block;margin:10px 0 6px' },
+        el('i', { style: 'width:40%;transition:width .4s ease' })),
+      el('div', { class: 'hint' }, 'Reading ', el('b', {}, file.name), ' — one moment…'));
     try {
       const isX = /\.xlsx$/i.test(file.name);
       const result = isX
@@ -296,6 +300,7 @@ function bulkStudentForm() {
       drawPreview();
     } catch (e) {
       err.textContent = e.message || 'Could not read the file.';
+      preview.replaceChildren();
     }
   }
 
@@ -333,18 +338,50 @@ function bulkStudentForm() {
 
   async function runProvision() {
     err.textContent = '';
+    const total = parsed.rows.length;
+    const batches = Math.ceil(total / BATCH);
+    const started = performance.now();
     createBtn.disabled = true;
     createBtn.textContent = 'Creating…';
+
+    // ── live progress panel — the admin always sees what the system is doing ──
+    const barFill = el('i', { style: 'width:0%;transition:width .35s ease' });
+    const bar = el('div', { class: 'upbar', style: 'display:block;margin:10px 0 8px' }, barFill);
+    const statusLine = el('div', { style: 'font-size:13.5px;font-weight:600' }, 'Starting…');
+    const counters = el('div', { class: 'row wrap', style: 'gap:6px' });
+    const progress = el('div', { style: 'padding:12px 16px;border:1px solid var(--line,#e5e7eb);border-radius:10px;margin-top:10px' },
+      statusLine, bar, counters);
+    preview.replaceChildren(progress);
+
     const all = { created: [], skipped: [], invalid: [...(parsed.invalid ?? [])] };
+    const drawCounters = () => counters.replaceChildren(
+      el('span', { class: 'chip ok' }, icons.checkCircle(), ` ${all.created.length} created`),
+      all.skipped.length > 0 && el('span', { class: 'chip warn' }, `${all.skipped.length} skipped — already have accounts`),
+      all.invalid.length > 0 && el('span', { class: 'chip danger' }, `${all.invalid.length} invalid rows`));
+    const elapsed = () => `${((performance.now() - started) / 1000).toFixed(1)}s`;
+
     try {
-      for (let i = 0; i < parsed.rows.length; i += BATCH) {
-        const batch = parsed.rows.slice(i, i + BATCH);
+      for (let b = 0; b < batches; b++) {
+        const from = b * BATCH + 1;
+        const to = Math.min((b + 1) * BATCH, total);
+        statusLine.replaceChildren(
+          `Creating accounts — batch ${b + 1} of ${batches} (rows ${from}–${to} of ${total}) · ${elapsed()} elapsed…`);
+        const batch = parsed.rows.slice(b * BATCH, (b + 1) * BATCH);
         const r = await api.post('/api/admin/students/bulk', {
           academic_level: level.value, password: pw.querySelector('input').value, rows: batch });
         all.created.push(...r.created); all.skipped.push(...r.skipped); all.invalid.push(...r.invalid);
+        barFill.style.width = `${Math.round(to / total * 100)}%`;
+        drawCounters();
       }
+
+      // ── finished — clear completion state + full results ──
       const { created, skipped, invalid } = all;
+      barFill.style.width = '100%';
+      barFill.style.background = 'var(--ok)';
+      statusLine.replaceChildren(icons.checkCircle(),
+        ` Done in ${elapsed()} — ${created.length} of ${total} account${created.length === 1 ? '' : 's'} created${skipped.length ? `, ${skipped.length} already existed (skipped)` : ''}.`);
       preview.replaceChildren(
+        progress,
         el('div', { class: 'row wrap mt-1' },
           el('span', { class: 'chip ok' }, icons.checkCircle(), ` ${created.length} created`),
           skipped.length > 0 && el('span', { class: 'chip warn' }, `${skipped.length} already have accounts — skipped`),
@@ -371,6 +408,22 @@ function bulkStudentForm() {
       toast(`${created.length} student accounts created${skipped.length ? ` · ${skipped.length} already existed (skipped)` : ''}.`, 'ok', 5000);
       parsed = null; fileInput.value = ''; updateBtn();
     } catch (e) {
+      // ── failed mid-run — keep every result so far, tell the admin exactly where it stopped ──
+      barFill.style.background = 'var(--danger)';
+      statusLine.replaceChildren(el('span', { style: 'color:var(--danger)' },
+        ` Stopped after ${all.created.length} created (${elapsed()}) — ${e.message}`));
+      if (all.created.length > 0) {
+        preview.replaceChildren(
+          progress,
+          el('div', { class: 'row wrap mt-1' },
+            el('span', { class: 'chip ok' }, ` ${all.created.length} created before the error`),
+            el('span', { class: 'chip warn' }, 'Fix the problem, then run again — already-created students will simply be skipped')),
+          el('div', { class: 'row mt-1 no-print' },
+            el('button', { class: 'btn ghost sm', onclick: () => {
+              downloadCsv('bulk-provisioned-partial.csv', ['Name', 'Student ID', 'Username'],
+                all.created.map((u) => [u.name, u.student_id, u.username]));
+            } }, el('span', { class: 'ic' }, icons.download()), 'Export accounts created so far')));
+      }
       err.textContent = e.details?.length ? `${e.message} (needs ${e.details.join(', ')})` : e.message;
       createBtn.disabled = false; updateBtn();
     }
