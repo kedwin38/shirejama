@@ -1,8 +1,13 @@
 // ── User administration service (FR-3.x) ─────────────────────────────────
+// Students have NO email: they are identified by their Student ID (plus an
+// internal username). Teachers/admins still require an email address.
 import { AppError, badRequest, conflict, notFound, weakPassword } from '../core/errors.js';
 import { hashPassword, verifyPassword, passwordPolicyProblems } from '../core/passwords.js';
 import { generateUsername, nextInstructorCode, nextStudentId } from '../core/ids.js';
 import { nowIso, reqEmail, reqString, reqLevel } from '../core/validate.js';
+
+const cleanStudentId = (v) => String(v ?? '').trim().toUpperCase().replace(/\s+/g, '');
+const validStudentId = (sid) => sid.length >= 3 && sid.length <= 40 && !sid.includes('@');
 
 export class UserService {
   constructor(db) { this.db = db; }
@@ -21,7 +26,7 @@ export class UserService {
   publicUser(u) {
     return {
       id: u.id, role: u.role, full_name: u.full_name, username: u.username,
-      email: u.email, is_active: !!u.is_active,
+      email: u.email ?? null, is_active: !!u.is_active,
       instructor_code: u.instructor_code ?? null,
       student_id: u.student_id ?? null,
       academic_level: u.academic_level ?? null,
@@ -75,7 +80,9 @@ export class UserService {
       ORDER BY u.role, u.full_name
       LIMIT 1000
     `).all(...params);
-    return rows.map((r) => ({ ...this.publicUser(r), course_count: r.course_count }));
+    const out = [];
+    for (const r of rows) out.push({ ...this.publicUser(r), course_count: r.course_count });
+    return out;
   }
 
   /** FR-3.1 — provision a teacher. */
@@ -105,24 +112,32 @@ export class UserService {
     });
   }
 
-  /** FR-3.2 — register a student. */
-  async createStudent({ full_name, email, academic_level, password }) {
+  /** FR-3.2 — register a student (no email; Student ID is the identity). */
+  async createStudent({ full_name, student_id, academic_level, password }) {
     const name = reqString(full_name, 'full name', { min: 3, max: 120 });
-    const mail = reqEmail(email);
     const level = reqLevel(academic_level);
     this._assertPassword(password);
+    let givenSid = typeof student_id === 'string' ? cleanStudentId(student_id) : '';
+    if (givenSid && !validStudentId(givenSid)) {
+      throw badRequest('Student ID must be 3–40 letters/digits/hyphens.');
+    }
 
     return await this.db.transaction(async () => {
-      if (await this.db.prepare('SELECT 1 FROM users WHERE email = ? COLLATE NOCASE').get(mail)) {
-        throw conflict('That email address is already used by another account.');
+      let sid;
+      if (givenSid) {
+        if (await this.db.prepare('SELECT 1 FROM users WHERE student_id = ?').get(givenSid)) {
+          throw conflict(`A student account already exists with ID ${givenSid}.`);
+        }
+        sid = givenSid;
+      } else {
+        sid = await nextStudentId(this.db);
       }
-      const sid = await nextStudentId(this.db);
       const username = await generateUsername(this.db, name);
       const now = nowIso();
       const { lastId } = await this.db.prepare(`
         INSERT INTO users (role, full_name, username, email, password_hash, student_id, academic_level, created_at, updated_at)
-        VALUES ('student', ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(name, username, mail, hashPassword(password), sid, level, now, now);
+        VALUES ('student', ?, ?, NULL, ?, ?, ?, ?, ?)
+      `).run(name, username, hashPassword(password), sid, level, now, now);
       return this.publicUser(await this._byId(lastId));
     });
   }
@@ -130,9 +145,10 @@ export class UserService {
   /**
    * Bulk provision — CSV/XLSX upload of {name, student_id} rows for ONE
    * academic level with one shared default password (policy-checked).
-   * Emails are system-generated from the Student ID; usernames from the
-   * name. Existing/duplicate IDs are skipped with reasons, never fatal.
-   * Capped per request (the UI batches larger files).
+   * Students receive NO email; usernames derive from the name. Rows whose
+   * Student ID already has an account are SKIPPED and reported back, so a
+   * re-uploaded list only creates the missing accounts. Capped per request
+   * (the UI batches larger files).
    */
   async bulkProvisionStudents({ academic_level, password, rows }) {
     const level = reqLevel(academic_level);
@@ -146,38 +162,32 @@ export class UserService {
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i] ?? {};
       const name = typeof row.name === 'string' ? row.name.trim() : '';
-      const sid = typeof row.student_id === 'string'
-        ? row.student_id.trim().toUpperCase().replace(/\s+/g, '') : '';
+      const sid = typeof row.student_id === 'string' ? cleanStudentId(row.student_id) : '';
 
       if (name.length < 3 || name.length > 120) {
         invalid.push({ row: i + 1, name, student_id: sid, reason: 'Name must be 3–120 characters.' });
         continue;
       }
-      if (sid.length < 3 || sid.length > 40 || sid.includes('@')) {
+      if (!validStudentId(sid)) {
         invalid.push({ row: i + 1, name, student_id: sid, reason: 'Student ID must be 3–40 letters/digits/hyphens.' });
         continue;
       }
       if (seenIds.has(sid)) {
-        skipped.push({ student_id: sid, name, reason: 'Duplicate Student ID in this file.' });
+        skipped.push({ student_id: sid, name, reason: 'Duplicate Student ID in this file — only the first row was used.' });
         continue;
       }
       seenIds.add(sid);
       if (await this.db.prepare('SELECT 1 FROM users WHERE student_id = ?').get(sid)) {
-        skipped.push({ student_id: sid, name, reason: 'Student ID already exists.' });
-        continue;
-      }
-      const email = sid.toLowerCase().replace(/[^a-z0-9.-]+/g, '-') + '@students.shirejama.school';
-      if (await this.db.prepare('SELECT 1 FROM users WHERE email = ? COLLATE NOCASE').get(email)) {
-        skipped.push({ student_id: sid, name, reason: 'Generated email conflicts with an existing account.' });
+        skipped.push({ student_id: sid, name, reason: 'An account already exists with this Student ID — skipped.' });
         continue;
       }
       const username = await generateUsername(this.db, name);
       const now = nowIso();
       await this.db.prepare(`
         INSERT INTO users (role, full_name, username, email, password_hash, is_active, student_id, academic_level, created_at, updated_at)
-        VALUES ('student', ?, ?, ?, ?, 1, ?, ?, ?, ?)
-      `).run(name, username, email, hashPassword(password), sid, level, now, now);
-      created.push({ name, student_id: sid, username, email });
+        VALUES ('student', ?, ?, NULL, ?, 1, ?, ?, ?, ?)
+      `).run(name, username, hashPassword(password), sid, level, now, now);
+      created.push({ name, student_id: sid, username });
     }
     return {
       created_count: created.length, skipped_count: skipped.length, invalid_count: invalid.length,
@@ -191,7 +201,12 @@ export class UserService {
     const fields = {};
     if (patch.full_name !== undefined) fields.full_name = reqString(patch.full_name, 'full name', { min: 3, max: 120 });
     if (patch.username !== undefined) fields.username = reqString(patch.username, 'username', { min: 3, max: 60 });
-    if (patch.email !== undefined) fields.email = reqEmail(patch.email);
+    if (patch.email !== undefined) {
+      // Students have no email (leave blank to clear); staff require one.
+      const raw = typeof patch.email === 'string' ? patch.email.trim() : '';
+      if (user.role === 'student' && !raw) fields.email = null;
+      else fields.email = reqEmail(raw);
+    }
     if (patch.is_active !== undefined) fields.is_active = patch.is_active ? 1 : 0;
     if (user.role === 'teacher' && patch.instructor_code !== undefined) {
       const code = reqString(patch.instructor_code, 'instructor code', { min: 3, max: 20 }).toUpperCase();
@@ -201,7 +216,8 @@ export class UserService {
     }
     if (user.role === 'student') {
       if (patch.student_id !== undefined) {
-        const sid = reqString(patch.student_id, 'student ID', { min: 3, max: 30 }).toUpperCase();
+        const sid = cleanStudentId(patch.student_id);
+        if (!validStudentId(sid)) throw badRequest('Student ID must be 3–40 letters/digits/hyphens.');
         const dupe = await this.db.prepare('SELECT id FROM users WHERE student_id = ? AND id != ?').get(sid, id);
         if (dupe) throw conflict(`Student ID ${sid} is already assigned.`);
         fields.student_id = sid;
