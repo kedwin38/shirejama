@@ -57,7 +57,7 @@ export class CatalogService {
 
     const materials = await this.db.prepare(`
       SELECT m.id, m.chapter_id, m.kind, m.title, m.description, m.file_name,
-             m.mime, m.size_bytes, m.allow_download, m.created_at
+             m.mime, m.size_bytes, m.allow_download, m.link_url, m.created_at
       FROM materials m JOIN chapters h ON h.id = m.chapter_id
       WHERE h.course_id = ? ORDER BY m.created_at
     `).all(courseId);
