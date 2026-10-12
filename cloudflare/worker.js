@@ -8,6 +8,7 @@ import { Router } from '../server/kernel/router.js';
 import { SessionStore, requireAuth } from '../server/core/auth.js';
 import { RateLimiter } from '../server/core/ratelimit.js';
 import { log } from '../server/core/log.js';
+import { migrate, pendingMigrations } from '../server/core/migrate.js';
 
 import { UserService } from '../server/services/users.js';
 import { CourseService } from '../server/services/courses.js';
@@ -16,7 +17,7 @@ import { AttemptService } from '../server/services/attempts.js';
 import { GradingService } from '../server/services/grading.js';
 import { CatalogService } from '../server/services/catalog.js';
 import { AnalyticsService } from '../server/services/analytics.js';
-import { BackupEngine, BackupFormat, JSONDumpFormat } from '../server/services/backups.js';
+import { BackupEngine } from '../server/services/backups.js';
 import { seedAdmin } from '../server/seed.js';
 
 import { registerAuthRoutes } from '../server/routes/auth.routes.js';
@@ -27,7 +28,6 @@ import { registerFileRoutes } from '../server/routes/files.routes.js';
 
 import { D1Port } from './d1-port.js';
 import { R2Vault } from './r2-vault.js';
-import { R2BackupTarget } from './r2-backup-target.js';
 import { jsonResponse, errorResponse, readJsonBody, parseCookies, cookieHeader, serveR2Object } from './kernel-http.js';
 
 let wiring = null; // built lazily on first request, reused across the isolate's lifetime
@@ -46,10 +46,7 @@ function build(env) {
     analytics: new AnalyticsService(db),
     vault,
   };
-  services.backups = new BackupEngine(db, null, {
-    target: new R2BackupTarget(env.MEDIA),
-    formats: [new JSONDumpFormat()],
-  });
+  services.backups = new BackupEngine(db);
 
   const router = new Router();
   const ctx = {
@@ -71,6 +68,16 @@ function build(env) {
 }
 
 async function ensureSeeded(w) {
+  // Schema migrations first (idempotent), then the admin seed.
+  try {
+    const pending = await pendingMigrations(w.db);
+    if (pending.length) {
+      await migrate(w.db);
+      log.info('db_migrated', { applied: pending });
+    }
+  } catch (e) {
+    log.error('db_migration_failed', { err: e.message });
+  }
   const { admin, created } = await seedAdmin(w.db);
   if (created) log.info('admin_seeded', { username: admin.username });
 }
@@ -141,20 +148,9 @@ export default {
   },
 
   // Cron trigger (every 30 minutes) — Workers has no persistent setInterval
-  // between requests, so the backup scheduler's tick runs here instead.
+  // between requests, so the backup policy tick runs here instead.
   async scheduled(event, env, execCtx) {
     if (!wiring) wiring = build(env);
-    const cfg = await wiring.backupEngine.config();
-    const FREQUENCIES = { off: 0, '6h': 6 * 3600e3, daily: 24 * 3600e3, weekly: 7 * 24 * 3600e3 };
-    if (!cfg.enabled || !FREQUENCIES[cfg.frequency]) return;
-    const next = cfg.next_run ? Date.parse(cfg.next_run) : 0;
-    if (next && Date.now() < next) return;
-    log.info('backup_scheduled_run', { scope: cfg.scope, format: cfg.format });
-    try {
-      await wiring.backupEngine.run({});
-    } finally {
-      const freq = FREQUENCIES[cfg.frequency];
-      await wiring.backupEngine._cfgSet('next_run', freq ? new Date(Date.now() + freq).toISOString() : '');
-    }
+    execCtx.waitUntil(wiring.backupEngine.tick());
   },
 };
