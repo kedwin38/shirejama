@@ -109,10 +109,10 @@ async function renderCourse(main, courseId) {
     el('div', { class: 'row wrap mb-2' },
       el('span', { class: 'chip neutral' }, `with ${course.teacher_name}`),
       course.levels.map((l) => el('span', { class: 'chip gold mono' }, LEVEL_LABELS[l]))),
-    course.resource_url && el('a', {
+    ...(course.resource_url ? [el('a', {
       class: 'btn gold-ghost mb-2', href: course.resource_url, target: '_blank', rel: 'noopener',
       style: 'display:inline-flex',
-    }, el('span', { class: 'ic' }, icons.grid()), 'Open the course learning material ↗'),
+    }, el('span', { class: 'ic' }, icons.grid()), 'Open the course learning material ↗')] : []),
     ...(chapters.length === 0
       ? [el('div', { class: 'card frame' }, el('div', { class: 'empty' }, el('div', { class: 'e-ico' }, icons.layers()),
           el('h4', {}, 'Chapters coming soon'), el('p', {}, 'Your teacher is still preparing this course.')))]

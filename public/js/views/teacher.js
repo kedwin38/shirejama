@@ -169,13 +169,13 @@ function chapterBlock(course, h) {
     };
     body.replaceChildren(
       el('div', { class: 'list-note' }, 'MATERIALS'),
-      h.materials.length === 0 && el('div', { class: 'list-note faint' }, 'No materials yet.'),
+      ...(h.materials.length === 0 ? [el('div', { class: 'list-note faint' }, 'No materials yet.')] : []),
       ...h.materials.map(matRow),
       el('div', { class: 'row mt-1 mb-2' },
         el('button', { class: 'btn ghost sm', onclick: () => uploadMaterial(course, h) }, el('span', { class: 'ic' }, icons.upload()), 'Add material'),
         el('button', { class: 'btn ghost sm', onclick: () => addLinkMaterial(course, h) }, el('span', { class: 'ic' }, icons.grid()), 'Add external link')),
       el('div', { class: 'list-note' }, 'QUIZZES'),
-      h.quizzes.length === 0 && el('div', { class: 'list-note faint' }, 'No quizzes yet.'),
+      ...(h.quizzes.length === 0 ? [el('div', { class: 'list-note faint' }, 'No quizzes yet.')] : []),
       ...h.quizzes.map((z) => quizBlock(course, h, z)),
       el('div', { class: 'row mt-1' },
         el('button', { class: 'btn ghost sm', onclick: () => quizDialog(course, h, null) }, el('span', { class: 'ic' }, icons.quiz()), 'Create quiz')),
