@@ -3,6 +3,19 @@ import { badRequest, forbidden, notFound } from '../core/errors.js';
 import { LEVELS } from '../config.js';
 import { nowIso, reqString } from '../core/validate.js';
 
+/** Optional external learning-material link (http/https) or blank. */
+function cleanResourceUrl(v) {
+  if (v == null) return null;
+  const s = String(v).trim();
+  if (!s) return null;
+  let u;
+  try { u = new URL(s); } catch { throw badRequest('The learning material link must be a valid http(s) URL.'); }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') {
+    throw badRequest('The learning material link must start with http:// or https://.');
+  }
+  return s.slice(0, 1000);
+}
+
 export class CourseService {
   constructor(db, vault) {
     this.db = db;
@@ -29,17 +42,18 @@ export class CourseService {
     return arr.sort();
   }
 
-  async create(teacherId, { title, description, levels }) {
+  async create(teacherId, { title, description, levels, resource_url }) {
     const t = reqString(title, 'title', { min: 3, max: 160 });
     const d = typeof description === 'string' ? description.trim().slice(0, 2000) : '';
     const lvls = CourseService.cleanLevels(levels);
+    const res = cleanResourceUrl(resource_url);
     let lastId;
     try {
       return await this.db.transaction(async () => {
         const now = nowIso();
         ({ lastId } = await this.db.prepare(
-          'INSERT INTO courses (teacher_id, title, description, created_at, updated_at) VALUES (?,?,?,?,?)'
-        ).run(teacherId, t, d, now, now));
+          'INSERT INTO courses (teacher_id, title, description, resource_url, created_at, updated_at) VALUES (?,?,?,?,?,?)'
+        ).run(teacherId, t, d, res, now, now));
         const ins = this.db.prepare('INSERT INTO course_levels (course_id, level) VALUES (?,?)');
         for (const l of lvls) await ins.run(lastId, l);
         return await this.detail(teacherId, lastId, { authoring: true });
@@ -57,6 +71,7 @@ export class CourseService {
     const fields = {};
     if (patch.title !== undefined) fields.title = reqString(patch.title, 'title', { min: 3, max: 160 });
     if (patch.description !== undefined) fields.description = String(patch.description ?? '').trim().slice(0, 2000);
+    if (patch.resource_url !== undefined) fields.resource_url = cleanResourceUrl(patch.resource_url);
     if (patch.levels !== undefined) fields._levels = CourseService.cleanLevels(patch.levels);
     if (!Object.keys(fields).length) throw badRequest('Nothing to update.');
     return await this.db.transaction(async () => {
@@ -261,6 +276,21 @@ export class CourseService {
     return await this.db.prepare('SELECT * FROM materials WHERE id = ?').get(lastId);
   }
 
+  /** External learning-material link (media hosted elsewhere). */
+  async addMaterialLink(teacherId, chapterId, { title, url, description }) {
+    const h = await this._chapterOwned(teacherId, chapterId);
+    const t = reqString(title, 'title', { min: 3, max: 160 });
+    const d = String(description ?? '').trim().slice(0, 1000);
+    const link = cleanResourceUrl(url);
+    if (!link) throw badRequest('Provide the external link (http/https URL) students will open.');
+    const { lastId } = await this.db.prepare(`
+      INSERT INTO materials (chapter_id, kind, title, description, link_url, created_at)
+      VALUES (?, 'link', ?, ?, ?, ?)
+    `).run(chapterId, t, d, link, nowIso());
+    await this.db.prepare('UPDATE courses SET updated_at = ? WHERE id = ?').run(nowIso(), h.course_id);
+    return await this.db.prepare('SELECT * FROM materials WHERE id = ?').get(lastId);
+  }
+
   async deleteMaterial(teacherId, materialId) {
     const m = await this.db.prepare(`
       SELECT m.*, c.teacher_id FROM materials m
@@ -270,7 +300,7 @@ export class CourseService {
     if (!m) throw notFound('Material not found.');
     if (m.teacher_id !== teacherId) throw forbidden('You can only manage your own courses.');
     await this.db.prepare('DELETE FROM materials WHERE id = ?').run(materialId);
-    await this.vault.removeQuietly(m.stored_path);
+    if (m.stored_path) await this.vault.removeQuietly(m.stored_path); // links have no stored file
     return { ok: true };
   }
 }
