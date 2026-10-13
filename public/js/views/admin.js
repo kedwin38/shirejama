@@ -76,32 +76,38 @@ async function renderAccounts(main) {
   }
 
   function drawTable(users) {
-    const head = { teacher: ['Instructor', 'Code', 'Email', 'Courses', 'Status', ''], student: ['Student', 'ID', 'Username', 'Level', 'Status', ''], admin: ['Administrator', 'Username', 'Email', '', 'Status', ''] }[role];
+    const head = { teacher: ['Instructor', 'Code', 'Email', 'Courses', 'Status', ''], student: ['Student_ID', 'Student_Name', 'Level', 'Status', ''], admin: ['Administrator', 'Username', 'Email', '', 'Status', ''] }[role];
+    const actionsCell = (u) => el('td', {}, el('div', { class: 'row-actions' },
+      el('button', { class: 'btn sm ghost', title: 'Edit account details', onclick: () => editUser(u) }, 'Edit'),
+      el('button', { class: 'btn sm ghost', title: 'Reset this user\u2019s password', onclick: () => resetPassword(u) }, 'Reset password'),
+      el('button', { class: 'icon-btn', title: u.is_active ? 'Deactivate account' : 'Activate account', onclick: () => toggleActive(u) },
+        u.is_active ? icons.xCircle() : icons.checkCircle()),
+      role !== 'admin' && el('button', { class: 'icon-btn', title: 'Delete permanently', onclick: () => deleteUser(u), style: 'color:var(--danger)' }, icons.trash()),
+    ));
     tblWrap.replaceChildren(
       users.length === 0 ? el('div', { class: 'empty' }, el('div', { class: 'e-ico' }, icons.search()),
         el('h4', {}, 'No accounts found'), el('p', {}, 'Try a different search or role tab.')) :
       el('div', { class: 'table-wrap' }, el('table', { class: 'tbl' },
         el('thead', {}, el('tr', {}, head.map((h) => el('th', {}, h)))),
-        el('tbody', {}, users.map((u) => el('tr', {},
-          el('td', {}, el('b', {}, u.full_name), el('div', { class: 'faint mono', style: 'font-size:11px' }, u.username)),
-          role === 'admin' ? el('td', { class: 'mono' }, u.username)
-            : el('td', {}, el('span', { class: 'chip gold mono' }, role === 'teacher' ? (u.instructor_code || '—') : (u.student_id || '—'))),
-          el('td', {}, u.email || '—'),
-          role === 'teacher' ? el('td', {}, String(u.course_count)) :
-            role === 'student' ? el('td', {}, LEVEL_LABELS[u.academic_level] || '—') : el('td', {}, ''),
-          statusChip(u),
-          el('td', {}, el('div', { class: 'row-actions' },
-            el('button', { class: 'btn sm ghost', title: 'Edit account details', onclick: () => editUser(u) }, 'Edit'),
-            el('button', { class: 'btn sm ghost', title: 'Reset this user\u2019s password', onclick: () => resetPassword(u) }, 'Reset password'),
-            el('button', { class: 'icon-btn', title: u.is_active ? 'Deactivate account' : 'Activate account', onclick: () => toggleActive(u) },
-              u.is_active ? icons.xCircle() : icons.checkCircle()),
-            role !== 'admin' && el('button', { class: 'icon-btn', title: 'Delete permanently', onclick: () => deleteUser(u), style: 'color:var(--danger)' }, icons.trash()),
-          )),
-        ))),
-      )));
+        el('tbody', {}, users.map((u) =>
+          role === 'student'
+            ? el('tr', {},
+                el('td', {}, el('span', { class: 'chip gold mono' }, u.student_id || '—')),
+                el('td', {}, el('b', {}, u.full_name)),
+                el('td', {}, LEVEL_LABELS[u.academic_level] || '—'),
+                statusChip(u),
+                actionsCell(u))
+            : el('tr', {},
+                el('td', {}, el('b', {}, u.full_name), el('div', { class: 'faint mono', style: 'font-size:11px' }, u.username)),
+                role === 'admin' ? el('td', { class: 'mono' }, u.username)
+                  : el('td', {}, el('span', { class: 'chip gold mono' }, u.instructor_code || '—')),
+                el('td', {}, u.email || '—'),
+                role === 'teacher' ? el('td', {}, String(u.course_count)) : el('td', {}, ''),
+                statusChip(u),
+                actionsCell(u)))))));
   }
 
-  const search = el('input', { class: 'input', placeholder: 'Search name, username, email, code…', oninput: (e) => { q = e.target.value; clearTimeout(search._t); search._t = setTimeout(load, 250); } });
+  const search = el('input', { class: 'input', placeholder: 'Search name, Student ID, code, email…', oninput: (e) => { q = e.target.value; clearTimeout(search._t); search._t = setTimeout(load, 250); } });
 
   main.replaceChildren(
     el('div', { class: 'page-head' },
@@ -119,11 +125,15 @@ async function renderAccounts(main) {
     el('div', { class: 'row mb-2' },
       search,
       el('button', { class: 'btn ghost sm', title: 'Export the current list as a spreadsheet', onclick: () => {
-        downloadCsv(`accounts-${role}.csv`,
-          ['Name', 'Username', 'Email', role === 'teacher' ? 'Instructor code' : 'Student ID', 'Level', 'Courses', 'Status', 'Created'],
-          lastUsers.map((u) => [u.full_name, u.username, u.email ?? '',
-            role === 'teacher' ? (u.instructor_code ?? '') : (u.student_id ?? ''),
-            u.academic_level ?? '', u.course_count ?? '', u.is_active ? 'active' : 'inactive', u.created_at]));
+        const cols = role === 'student'
+          ? ['Student_ID', 'Student_Name', 'Level', 'Status', 'Created']
+          : ['Name', 'Username', 'Email', role === 'teacher' ? 'Instructor code' : '', 'Level', 'Courses', 'Status', 'Created'].filter(Boolean);
+        const rows = role === 'student'
+          ? lastUsers.map((u) => [u.student_id ?? '', u.full_name, u.academic_level ?? '', u.is_active ? 'active' : 'inactive', u.created_at])
+          : lastUsers.map((u) => [u.full_name, u.username, u.email ?? '',
+              role === 'teacher' ? (u.instructor_code ?? '') : '',
+              u.academic_level ?? '', u.course_count ?? '', u.is_active ? 'active' : 'inactive', u.created_at]);
+        downloadCsv(`accounts-${role}.csv`, cols, rows);
         toast(`accounts-${role}.csv exported.`, 'ok', 2500);
       } }, el('span', { class: 'ic' }, icons.download()), 'Export CSV'),
       el('span', { class: 'spacer' })),
@@ -148,22 +158,22 @@ function editUser(u) {
   openModal((card, done) => {
     const name = el('input', { class: 'input', value: u.full_name });
     const username = el('input', { class: 'input', value: u.username });
-    const email = el('input', { class: 'input', value: u.email || '', placeholder: u.role === 'student' ? 'Students have no email' : 'name@shirejama.school' });
+    const email = el('input', { class: 'input', value: u.email || '', placeholder: 'name@shirejama.school' });
     const err = el('div', { class: 'err-line' });
     const roleField = u.role === 'teacher'
       ? el('div', { class: 'field' }, el('label', {}, 'INSTRUCTOR CODE'), code = el('input', { class: 'input mono', value: u.instructor_code || '' }))
       : u.role === 'student'
-        ? el('div', { class: 'field' }, el('label', {}, 'STUDENT ID'), sid = el('input', { class: 'input mono', value: u.student_id || '' }))
+        ? el('div', { class: 'field' }, el('label', {}, 'STUDENT_ID'), sid = el('input', { class: 'input mono', value: u.student_id || '' }))
         : null;
     let code, sid;
     const levelSel = u.role === 'student' ? el('select', { class: 'select' },
       LEVELS.map((l) => el('option', { value: l, selected: u.academic_level === l }, LEVEL_LABELS[l]))) : null;
     card.append(
-      el('div', { class: 'modal-head' }, el('h3', {}, `Edit · ${u.role}`),
+      el('div', { class: 'modal-head' }, el('h3', {}, u.role === 'student' ? `Edit · Student ${u.student_id || ''}` : `Edit · ${u.role}`),
         el('button', { class: 'icon-btn x', onclick: done }, icons.x())),
       el('div', { class: 'modal-body' },
-        el('div', { class: 'field' }, el('label', {}, 'FULL NAME'), name),
-        el('div', { class: 'field' }, el('label', {}, 'USERNAME'), username),
+        el('div', { class: 'field' }, el('label', {}, u.role === 'student' ? 'STUDENT_NAME' : 'FULL NAME'), name),
+        u.role !== 'student' && el('div', { class: 'field' }, el('label', {}, 'USERNAME'), username),
         u.role !== 'student' && el('div', { class: 'field' }, el('label', {}, 'EMAIL'), email),
         roleField,
         levelSel && el('div', { class: 'field' }, el('label', {}, 'ACADEMIC LEVEL'), levelSel),
@@ -173,9 +183,8 @@ function editUser(u) {
         el('button', { class: 'btn ghost', onclick: done }, 'Cancel'),
         el('button', { class: 'btn primary', onclick: async () => {
           err.textContent = '';
-          const patch = { full_name: name.value, username: username.value };
-          if (u.role !== 'student') patch.email = email.value;
-          else patch.email = ''; // clear/keep students email-free
+          const patch = { full_name: name.value };
+          if (u.role !== 'student') { patch.username = username.value; patch.email = email.value; }
           if (u.role === 'teacher' && code?.value) patch.instructor_code = code.value;
           if (u.role === 'student') {
             if (sid?.value) patch.student_id = sid.value;
@@ -388,18 +397,17 @@ function bulkStudentForm() {
           invalid.length > 0 && el('span', { class: 'chip danger' }, `${invalid.length} invalid rows`)),
         created.length > 0 && el('div', { class: 'table-wrap mt-1', style: 'box-shadow:none;max-height:260px;overflow:auto' },
           el('table', { class: 'tbl' },
-            el('thead', {}, el('tr', {}, ['Student', 'Student ID (sign-in)', 'Username'].map((h) => el('th', {}, h)))),
+            el('thead', {}, el('tr', {}, ['Student_ID', 'Student_Name'].map((h) => el('th', {}, h)))),
             el('tbody', {}, created.slice(0, 50).map((u) => el('tr', {},
-              el('td', {}, u.name),
               el('td', { class: 'mono' }, u.student_id),
-              el('td', { class: 'mono faint' }, u.username)))))),
+              el('td', {}, u.name)))))),
         skipped.length > 0 && el('div', { class: 'hint mt-1' },
           'Already have accounts: ' + skipped.slice(0, 6).map((s) => `${s.student_id} (${s.name})`).join(' · ')
           + (skipped.length > 6 ? ` … +${skipped.length - 6} more` : '')),
         el('div', { class: 'row mt-1 no-print' },
           el('button', { class: 'btn ghost sm', onclick: () => {
-            downloadCsv('bulk-provisioned.csv', ['Name', 'Student ID', 'Username'],
-              created.map((u) => [u.name, u.student_id, u.username]));
+            downloadCsv('bulk-provisioned.csv', ['Student_ID', 'Student_Name'],
+              created.map((u) => [u.student_id, u.name]));
           } }, el('span', { class: 'ic' }, icons.download()), 'Export created accounts'),
           el('button', { class: 'btn ghost sm', onclick: () => {
             downloadCsv('bulk-skipped.csv', ['Student ID', 'Name', 'Reason'],
@@ -420,8 +428,8 @@ function bulkStudentForm() {
             el('span', { class: 'chip warn' }, 'Fix the problem, then run again — already-created students will simply be skipped')),
           el('div', { class: 'row mt-1 no-print' },
             el('button', { class: 'btn ghost sm', onclick: () => {
-              downloadCsv('bulk-provisioned-partial.csv', ['Name', 'Student ID', 'Username'],
-                all.created.map((u) => [u.name, u.student_id, u.username]));
+              downloadCsv('bulk-provisioned-partial.csv', ['Student_ID', 'Student_Name'],
+                all.created.map((u) => [u.student_id, u.name]));
             } }, el('span', { class: 'ic' }, icons.download()), 'Export accounts created so far')));
       }
       err.textContent = e.details?.length ? `${e.message} (needs ${e.details.join(', ')})` : e.message;
