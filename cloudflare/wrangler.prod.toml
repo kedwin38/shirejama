@@ -1,0 +1,26 @@
+# ── Shire Jama LMS · Cloudflare Workers deployment — PRODUCTION ───────────
+# Account: Shirejamacadult@gmail.com (51957ff7d191eba103fa8a9b27df7f13)
+# Deploy:  CLOUDFLARE_API_TOKEN=… npx wrangler deploy -c wrangler.prod.toml
+name = "shirejama"
+main = "worker.js"
+compatibility_date = "2026-10-01"
+compatibility_flags = ["nodejs_compat"]
+
+# SPA served from Workers Assets (free + unlimited static requests);
+# /api/* always hits the Worker.
+[assets]
+directory = "../public"
+not_found_handling = "single-page-application"
+run_worker_first = ["/api/*"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "shirejama"
+database_id = "cc9ceaa5-e183-44f7-8c1b-ca96c7503713"
+
+[[r2_buckets]]
+binding = "MEDIA"
+bucket_name = "shirejama-media"
+
+[triggers]
+crons = ["*/30 * * * *"]
