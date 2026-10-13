@@ -374,7 +374,25 @@ function bulkStudentForm() {
     const elapsed = () => `${((performance.now() - started) / 1000).toFixed(1)}s`;
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-    // ── the queue: every batch runs with retries; one bad batch never stops the rest ──
+    // queue request with a HARD timeout — a hung/lost response becomes a
+    // retryable failure instead of freezing the run; reconciliation against
+    // the database remains the source of truth either way.
+    const postBulk = async (body, timeoutMs = 45000) => {
+      const res = await fetch('/api/admin/students/bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'fetch' },
+        credentials: 'same-origin',
+        signal: AbortSignal.timeout(timeoutMs),
+        body: JSON.stringify(body),
+      });
+      let data = null;
+      const ct = res.headers.get('content-type') || '';
+      if (ct.includes('application/json')) data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error?.message || `Request failed (${res.status})`);
+      return data;
+    };
+
+    // ── the queue: every batch runs with retries + timeout; one bad batch never stops the rest ──
     for (let b = 0; b < batches; b++) {
       const from = b * BATCH + 1;
       const to = Math.min((b + 1) * BATCH, total);
@@ -386,11 +404,11 @@ function bulkStudentForm() {
           `Provisioning — batch ${b + 1} of ${batches} (rows ${from}–${to} of ${total})` +
           (attempt > 1 ? ` · retry ${attempt - 1}/2` : '') + ` · ${elapsed()} elapsed…`);
         try {
-          r = await api.post('/api/admin/students/bulk', {
+          r = await postBulk({
             academic_level: level.value, password: pw.querySelector('input').value, rows: batch });
           break;
         } catch (e) {
-          lastErr = e;
+          lastErr = e instanceof Error ? e : new Error(String(e));
           if (attempt < 3) await sleep(1200 * attempt);   // brief backoff, then retry
         }
       }
@@ -406,10 +424,14 @@ function bulkStudentForm() {
     // ── reconciliation — trust the database, not the responses: verify every ID ──
     statusLine.replaceChildren(`Reconciling — verifying every account against the database… · ${elapsed()}`);
     let dbIds = new Set();
+    let reconcileOk = true;
     try {
-      const { users } = await api.get('/api/admin/users?role=student');
+      const { users } = await Promise.race([
+        api.get('/api/admin/users?role=student'),
+        sleep(30000).then(() => { throw new Error('reconciliation check timed out'); }),
+      ]);
       dbIds = new Set(users.map((u) => (u.student_id || '').toUpperCase()).filter(Boolean));
-    } catch (e) { /* reconcile best-effort; report below */ }
+    } catch (e) { reconcileOk = false; /* reconcile best-effort; report below */ }
 
     const reasons = new Map();                       // sid → reason for anything not created
     for (const s of all.skipped) reasons.set(String(s.student_id).toUpperCase(), s.reason);
@@ -419,13 +441,27 @@ function bulkStudentForm() {
     // students that already existed BEFORE this run (server-reported skips) must not count as created
     const preExisting = new Set(all.skipped.filter((s) => /already exists/i.test(s.reason || '')).map((s) => String(s.student_id).toUpperCase()));
     const verified = [], notCreated = [];
-    for (const row of fileRows) {
-      const sid = String(row.student_id || '').trim().toUpperCase().replace(/\s+/g, '');
-      if (sid && dbIds.has(sid) && !preExisting.has(sid)) verified.push(row);
-      else notCreated.push({
-        student_id: row.student_id, name: row.name,
-        reason: reasons.get(sid) ?? (failedRanges.length ? 'Not created — a batch failed after retries. Re-run the file; existing IDs will be skipped.' : 'Not created — unknown reason. Re-run the file; existing IDs will be skipped.'),
-      });
+    const norm = (v) => String(v || '').trim().toUpperCase().replace(/\s+/g, '');
+    if (reconcileOk) {
+      for (const row of fileRows) {
+        const sid = norm(row.student_id);
+        if (sid && dbIds.has(sid) && !preExisting.has(sid)) verified.push(row);
+        else notCreated.push({
+          student_id: row.student_id, name: row.name,
+          reason: reasons.get(sid) ?? (failedRanges.length ? 'Not created — a batch failed after retries. Re-run the file; existing IDs will be skipped.' : 'Not created — unknown reason. Re-run the file; existing IDs will be skipped.'),
+        });
+      }
+    } else {
+      // database check unavailable — report from the server responses instead
+      const createdIds = new Set(all.created.map((c) => norm(c.student_id)));
+      for (const row of fileRows) {
+        const sid = norm(row.student_id);
+        if (createdIds.has(sid)) verified.push(row);
+        else notCreated.push({
+          student_id: row.student_id, name: row.name,
+          reason: reasons.get(sid) ?? 'Unverified — the database check was unavailable. Re-run the file; existing IDs will be skipped.',
+        });
+      }
     }
 
     // ── final report panel ──
@@ -475,7 +511,7 @@ function bulkStudentForm() {
             all.skipped.map((s) => [s.student_id, s.name, s.reason]));
         } }, el('span', { class: 'ic' }, icons.download()), 'Export skipped')));
 
-    if (dbIds.size === 0 && !doneOk) {
+    if (!reconcileOk) {
       toast('Provisioning finished, but the reconciliation check could not read the database — verify the Accounts tab.', 'err', 7000);
     } else {
       toast(`${verified.length} of ${total} verified created${notCreated.length ? ` · ${notCreated.length} not created — see the report` : ''}.`, doneOk ? 'ok' : 'err', doneOk ? 5000 : 8000);
