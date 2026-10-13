@@ -32,3 +32,12 @@ node_modules/
 .wrangler/
 dist/
 dist-verify/
+
+# curl scratch / test-output droppings (session-cookie jars, API dumps)
+cookies.txt
+*-cookies.txt
+lms-*.txt
+v-*.txt
+cfb.json
+run.json
+start.json
