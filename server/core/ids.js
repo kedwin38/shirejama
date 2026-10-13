@@ -26,13 +26,26 @@ const transliterate = (name) => name.toLowerCase()
   .normalize('NFKD').replace(/[̀-ͯ]/g, '')
   .replace(/[^a-z0-9]+/g, ' ').trim().split(/\s+/).filter(Boolean);
 
-/** Unique username from a full name: "Amina Yusuf" → amina.yusuf, amina.yusuf2 … */
-export async function generateUsername(db, fullName) {
+/** Base username for a full name: "Amina Yusuf" → "amina.yusuf". Pure. */
+export const usernameBase = (fullName) => {
   const parts = transliterate(fullName);
-  const base = (parts.length ? parts.join('.') : 'member').slice(0, 40);
+  return (parts.length ? parts.join('.') : 'member').slice(0, 40);
+};
+
+/** Allocate a unique username from a base against a lowercased taken-set. Pure. */
+export const allocateUsername = (base, takenLc) => {
   let candidate = base;
   let n = 2;
+  while (takenLc.has(candidate.toLowerCase())) candidate = `${base}${n++}`;
+  return candidate;
+};
+
+/** Unique username from a full name: "Amina Yusuf" → amina.yusuf, amina.yusuf2 … */
+export async function generateUsername(db, fullName) {
+  const base = usernameBase(fullName);
   const exists = db.prepare('SELECT 1 FROM users WHERE username = ? COLLATE NOCASE');
+  let candidate = base;
+  let n = 2;
   while (await exists.get(candidate)) candidate = `${base}${n++}`;
   return candidate;
 }

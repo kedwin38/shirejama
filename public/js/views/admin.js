@@ -259,7 +259,7 @@ function renderProvision(main) {
 
 /* ── Bulk provision: CSV/XLSX (Name, Student_ID) for one academic level ── */
 function bulkStudentForm() {
-  const BATCH = 100;
+  const BATCH = 50;
   let parsed = null; // { rows, invalid }
 
   const level = el('select', { class: 'select' },
@@ -347,13 +347,15 @@ function bulkStudentForm() {
 
   async function runProvision() {
     err.textContent = '';
-    const total = parsed.rows.length;
+    const fileRows = parsed.rows;                 // snapshot for reconciliation
+    const fileInvalid = [...(parsed.invalid ?? [])];
+    const total = fileRows.length;
     const batches = Math.ceil(total / BATCH);
     const started = performance.now();
     createBtn.disabled = true;
     createBtn.textContent = 'Creating…';
 
-    // ── live progress panel — the admin always sees what the system is doing ──
+    // ── live progress panel — the admin always sees exactly what the queue is doing ──
     const barFill = el('i', { style: 'width:0%;transition:width .35s ease' });
     const bar = el('div', { class: 'upbar', style: 'display:block;margin:10px 0 8px' }, barFill);
     const statusLine = el('div', { style: 'font-size:13.5px;font-weight:600' }, 'Starting…');
@@ -362,79 +364,123 @@ function bulkStudentForm() {
       statusLine, bar, counters);
     preview.replaceChildren(progress);
 
-    const all = { created: [], skipped: [], invalid: [...(parsed.invalid ?? [])] };
+    const all = { created: [], skipped: [], invalid: [...fileInvalid] };
+    const failedRanges = [];   // batches that failed after all retries
     const drawCounters = () => counters.replaceChildren(
       el('span', { class: 'chip ok' }, icons.checkCircle(), ` ${all.created.length} created`),
       all.skipped.length > 0 && el('span', { class: 'chip warn' }, `${all.skipped.length} skipped — already have accounts`),
-      all.invalid.length > 0 && el('span', { class: 'chip danger' }, `${all.invalid.length} invalid rows`));
+      all.invalid.length > 0 && el('span', { class: 'chip danger' }, `${all.invalid.length} invalid rows`),
+      failedRanges.length > 0 && el('span', { class: 'chip danger' }, `${failedRanges.length} batch${failedRanges.length === 1 ? '' : 'es'} failed after retries`));
     const elapsed = () => `${((performance.now() - started) / 1000).toFixed(1)}s`;
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-    try {
-      for (let b = 0; b < batches; b++) {
-        const from = b * BATCH + 1;
-        const to = Math.min((b + 1) * BATCH, total);
+    // ── the queue: every batch runs with retries; one bad batch never stops the rest ──
+    for (let b = 0; b < batches; b++) {
+      const from = b * BATCH + 1;
+      const to = Math.min((b + 1) * BATCH, total);
+      const batch = fileRows.slice(b * BATCH, (b + 1) * BATCH);
+
+      let r = null, lastErr = null;
+      for (let attempt = 1; attempt <= 3; attempt++) {
         statusLine.replaceChildren(
-          `Creating accounts — batch ${b + 1} of ${batches} (rows ${from}–${to} of ${total}) · ${elapsed()} elapsed…`);
-        const batch = parsed.rows.slice(b * BATCH, (b + 1) * BATCH);
-        const r = await api.post('/api/admin/students/bulk', {
-          academic_level: level.value, password: pw.querySelector('input').value, rows: batch });
-        all.created.push(...r.created); all.skipped.push(...r.skipped); all.invalid.push(...r.invalid);
-        barFill.style.width = `${Math.round(to / total * 100)}%`;
-        drawCounters();
+          `Provisioning — batch ${b + 1} of ${batches} (rows ${from}–${to} of ${total})` +
+          (attempt > 1 ? ` · retry ${attempt - 1}/2` : '') + ` · ${elapsed()} elapsed…`);
+        try {
+          r = await api.post('/api/admin/students/bulk', {
+            academic_level: level.value, password: pw.querySelector('input').value, rows: batch });
+          break;
+        } catch (e) {
+          lastErr = e;
+          if (attempt < 3) await sleep(1200 * attempt);   // brief backoff, then retry
+        }
       }
+      if (r) {
+        all.created.push(...r.created); all.skipped.push(...r.skipped); all.invalid.push(...r.invalid);
+      } else {
+        failedRanges.push({ from, to, error: lastErr?.message ?? 'request failed' });
+      }
+      barFill.style.width = `${Math.round(to / total * 100)}%`;
+      drawCounters();
+    }
 
-      // ── finished — clear completion state + full results ──
-      const { created, skipped, invalid } = all;
-      barFill.style.width = '100%';
-      barFill.style.background = 'var(--ok)';
-      statusLine.replaceChildren(icons.checkCircle(),
-        ` Done in ${elapsed()} — ${created.length} of ${total} account${created.length === 1 ? '' : 's'} created${skipped.length ? `, ${skipped.length} already existed (skipped)` : ''}.`);
-      preview.replaceChildren(
-        progress,
-        el('div', { class: 'row wrap mt-1' },
-          el('span', { class: 'chip ok' }, icons.checkCircle(), ` ${created.length} created`),
-          skipped.length > 0 && el('span', { class: 'chip warn' }, `${skipped.length} already have accounts — skipped`),
-          invalid.length > 0 && el('span', { class: 'chip danger' }, `${invalid.length} invalid rows`)),
-        created.length > 0 && el('div', { class: 'table-wrap mt-1', style: 'box-shadow:none;max-height:260px;overflow:auto' },
+    // ── reconciliation — trust the database, not the responses: verify every ID ──
+    statusLine.replaceChildren(`Reconciling — verifying every account against the database… · ${elapsed()}`);
+    let dbIds = new Set();
+    try {
+      const { users } = await api.get('/api/admin/users?role=student');
+      dbIds = new Set(users.map((u) => (u.student_id || '').toUpperCase()).filter(Boolean));
+    } catch (e) { /* reconcile best-effort; report below */ }
+
+    const reasons = new Map();                       // sid → reason for anything not created
+    for (const s of all.skipped) reasons.set(String(s.student_id).toUpperCase(), s.reason);
+    for (const v of all.invalid) if (v.student_id) reasons.set(String(v.student_id).toUpperCase(), v.reason);
+    for (const f of failedRanges) reasons.set(`__range_${f.from}`, f.error);
+
+    // students that already existed BEFORE this run (server-reported skips) must not count as created
+    const preExisting = new Set(all.skipped.filter((s) => /already exists/i.test(s.reason || '')).map((s) => String(s.student_id).toUpperCase()));
+    const verified = [], notCreated = [];
+    for (const row of fileRows) {
+      const sid = String(row.student_id || '').trim().toUpperCase().replace(/\s+/g, '');
+      if (sid && dbIds.has(sid) && !preExisting.has(sid)) verified.push(row);
+      else notCreated.push({
+        student_id: row.student_id, name: row.name,
+        reason: reasons.get(sid) ?? (failedRanges.length ? 'Not created — a batch failed after retries. Re-run the file; existing IDs will be skipped.' : 'Not created — unknown reason. Re-run the file; existing IDs will be skipped.'),
+      });
+    }
+
+    // ── final report panel ──
+    const doneOk = notCreated.length === 0;
+    barFill.style.width = '100%';
+    barFill.style.background = doneOk ? 'var(--ok)' : 'var(--warn, #d97706)';
+    statusLine.replaceChildren(doneOk ? icons.checkCircle() : icons.xCircle(),
+      ` Done in ${elapsed()} — ${verified.length} of ${total} account${verified.length === 1 ? '' : 's'} verified created in the database${notCreated.length ? ` · ${notCreated.length} not created` : ''}.`);
+
+    const notCreatedTable = notCreated.length > 0 ? el('div', { class: 'mt-1' },
+      el('div', { class: 'list-note', style: 'color:var(--danger)' }, `NOT CREATED (${notCreated.length})`),
+      el('div', { class: 'table-wrap', style: 'box-shadow:none;max-height:220px;overflow:auto' },
+        el('table', { class: 'tbl' },
+          el('thead', {}, el('tr', {}, ['Student_ID', 'Student_Name', 'Reason'].map((h) => el('th', {}, h)))),
+          el('tbody', {}, notCreated.map((n) => el('tr', {},
+            el('td', { class: 'mono' }, n.student_id || '—'),
+            el('td', {}, n.name || '—'),
+            el('td', { class: 'faint' }, n.reason))))))) : null;
+
+    preview.replaceChildren(
+      progress,
+      el('div', { class: 'row wrap mt-1' },
+        el('span', { class: 'chip ok' }, icons.checkCircle(), ` ${verified.length} verified created`),
+        notCreated.length > 0 && el('span', { class: 'chip danger' }, `${notCreated.length} not created`),
+        all.skipped.length > 0 && el('span', { class: 'chip warn' }, `${all.skipped.length} already had accounts — skipped`),
+        all.invalid.length > 0 && el('span', { class: 'chip danger' }, `${all.invalid.length} invalid rows`)),
+      notCreatedTable,
+      verified.length > 0 && el('div', { class: 'mt-1' },
+        el('div', { class: 'list-note' }, `CREATED & VERIFIED (${verified.length})`),
+        el('div', { class: 'table-wrap', style: 'box-shadow:none;max-height:240px;overflow:auto' },
           el('table', { class: 'tbl' },
             el('thead', {}, el('tr', {}, ['Student_ID', 'Student_Name'].map((h) => el('th', {}, h)))),
-            el('tbody', {}, created.slice(0, 50).map((u) => el('tr', {},
+            el('tbody', {}, verified.slice(0, 50).map((u) => el('tr', {},
               el('td', { class: 'mono' }, u.student_id),
-              el('td', {}, u.name)))))),
-        skipped.length > 0 && el('div', { class: 'hint mt-1' },
-          'Already have accounts: ' + skipped.slice(0, 6).map((s) => `${s.student_id} (${s.name})`).join(' · ')
-          + (skipped.length > 6 ? ` … +${skipped.length - 6} more` : '')),
-        el('div', { class: 'row mt-1 no-print' },
-          el('button', { class: 'btn ghost sm', onclick: () => {
-            downloadCsv('bulk-provisioned.csv', ['Student_ID', 'Student_Name'],
-              created.map((u) => [u.student_id, u.name]));
-          } }, el('span', { class: 'ic' }, icons.download()), 'Export created accounts'),
-          el('button', { class: 'btn ghost sm', onclick: () => {
-            downloadCsv('bulk-skipped.csv', ['Student ID', 'Name', 'Reason'],
-              skipped.map((s) => [s.student_id, s.name, s.reason]));
-          } }, el('span', { class: 'ic' }, icons.download()), 'Export skipped')));
-      toast(`${created.length} student accounts created${skipped.length ? ` · ${skipped.length} already existed (skipped)` : ''}.`, 'ok', 5000);
-      parsed = null; fileInput.value = ''; updateBtn();
-    } catch (e) {
-      // ── failed mid-run — keep every result so far, tell the admin exactly where it stopped ──
-      barFill.style.background = 'var(--danger)';
-      statusLine.replaceChildren(el('span', { style: 'color:var(--danger)' },
-        ` Stopped after ${all.created.length} created (${elapsed()}) — ${e.message}`));
-      if (all.created.length > 0) {
-        preview.replaceChildren(
-          progress,
-          el('div', { class: 'row wrap mt-1' },
-            el('span', { class: 'chip ok' }, ` ${all.created.length} created before the error`),
-            el('span', { class: 'chip warn' }, 'Fix the problem, then run again — already-created students will simply be skipped')),
-          el('div', { class: 'row mt-1 no-print' },
-            el('button', { class: 'btn ghost sm', onclick: () => {
-              downloadCsv('bulk-provisioned-partial.csv', ['Student_ID', 'Student_Name'],
-                all.created.map((u) => [u.student_id, u.name]));
-            } }, el('span', { class: 'ic' }, icons.download()), 'Export accounts created so far')));
-      }
-      err.textContent = e.details?.length ? `${e.message} (needs ${e.details.join(', ')})` : e.message;
-      createBtn.disabled = false; updateBtn();
+              el('td', {}, u.name))))))),
+      el('div', { class: 'row mt-1 no-print' },
+        el('button', { class: 'btn ghost sm', onclick: () => {
+          downloadCsv('bulk-provisioned.csv', ['Student_ID', 'Student_Name'],
+            verified.map((u) => [u.student_id, u.name]));
+        } }, el('span', { class: 'ic' }, icons.download()), 'Export created'),
+        notCreated.length > 0 && el('button', { class: 'btn ghost sm', onclick: () => {
+          downloadCsv('bulk-not-created.csv', ['Student_ID', 'Student_Name', 'Reason'],
+            notCreated.map((n) => [n.student_id, n.name, n.reason]));
+        } }, el('span', { class: 'ic' }, icons.download()), 'Export not created'),
+        el('button', { class: 'btn ghost sm', onclick: () => {
+          downloadCsv('bulk-skipped.csv', ['Student ID', 'Name', 'Reason'],
+            all.skipped.map((s) => [s.student_id, s.name, s.reason]));
+        } }, el('span', { class: 'ic' }, icons.download()), 'Export skipped')));
+
+    if (dbIds.size === 0 && !doneOk) {
+      toast('Provisioning finished, but the reconciliation check could not read the database — verify the Accounts tab.', 'err', 7000);
+    } else {
+      toast(`${verified.length} of ${total} verified created${notCreated.length ? ` · ${notCreated.length} not created — see the report` : ''}.`, doneOk ? 'ok' : 'err', doneOk ? 5000 : 8000);
     }
+    parsed = null; fileInput.value = ''; updateBtn();
   }
 
   fileInput.addEventListener('change', () => fileInput.files[0] && readFile(fileInput.files[0]));

@@ -3,7 +3,7 @@
 // internal username). Teachers/admins still require an email address.
 import { AppError, badRequest, conflict, notFound, weakPassword } from '../core/errors.js';
 import { hashPassword, verifyPassword, passwordPolicyProblems } from '../core/passwords.js';
-import { generateUsername, nextInstructorCode, nextStudentId } from '../core/ids.js';
+import { generateUsername, nextInstructorCode, nextStudentId, usernameBase, allocateUsername } from '../core/ids.js';
 import { nowIso, reqEmail, reqString, reqLevel } from '../core/validate.js';
 
 const cleanStudentId = (v) => String(v ?? '').trim().toUpperCase().replace(/\s+/g, '');
@@ -147,8 +147,13 @@ export class UserService {
    * academic level with one shared default password (policy-checked).
    * Students receive NO email; usernames derive from the name. Rows whose
    * Student ID already has an account are SKIPPED and reported back, so a
-   * re-uploaded list only creates the missing accounts. Capped per request
-   * (the UI batches larger files).
+   * re-uploaded list only creates the missing accounts.
+   *
+   * Engineered for large files: O(1) database round trips per request
+   * (set-based duplicate check + one batched INSERT) and the shared password
+   * is hashed ONCE — 100 rows cost roughly one scrypt, not 100, so a batch
+   * can never blow the Worker CPU/wall budget mid-run the way per-row loops
+   * did. Capped per request; the UI queues larger files in slices.
    */
   async bulkProvisionStudents({ academic_level, password, rows }) {
     const level = reqLevel(academic_level);
@@ -156,14 +161,13 @@ export class UserService {
     if (!Array.isArray(rows) || rows.length === 0) throw badRequest('Provide at least one student row.');
     if (rows.length > 150) throw badRequest('Bulk provision accepts up to 150 students per request — larger files are batched automatically.');
 
-    const created = [], skipped = [], invalid = [];
+    // 1 · validate + clean every row in memory; dedupe within the file
+    const valid = [], skipped = [], invalid = [];
     const seenIds = new Set();
-
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i] ?? {};
       const name = typeof row.name === 'string' ? row.name.trim() : '';
       const sid = typeof row.student_id === 'string' ? cleanStudentId(row.student_id) : '';
-
       if (name.length < 3 || name.length > 120) {
         invalid.push({ row: i + 1, name, student_id: sid, reason: 'Name must be 3–120 characters.' });
         continue;
@@ -177,18 +181,60 @@ export class UserService {
         continue;
       }
       seenIds.add(sid);
-      if (await this.db.prepare('SELECT 1 FROM users WHERE student_id = ?').get(sid)) {
-        skipped.push({ student_id: sid, name, reason: 'An account already exists with this Student ID — skipped.' });
-        continue;
-      }
-      const username = await generateUsername(this.db, name);
-      const now = nowIso();
-      await this.db.prepare(`
-        INSERT INTO users (role, full_name, username, email, password_hash, is_active, student_id, academic_level, created_at, updated_at)
-        VALUES ('student', ?, ?, NULL, ?, 1, ?, ?, ?, ?)
-      `).run(name, username, hashPassword(password), sid, level, now, now);
-      created.push({ name, student_id: sid, username });
+      valid.push({ name, student_id: sid });
     }
+
+    // 2 · set-based existence check — one query per ≤100 IDs
+    const existing = new Set();
+    for (let i = 0; i < valid.length; i += 100) {
+      const chunk = valid.slice(i, i + 100);
+      const ph = chunk.map(() => '?').join(',');
+      const found = await this.db.prepare(`SELECT student_id FROM users WHERE student_id IN (${ph})`)
+        .all(...chunk.map((r) => r.student_id));
+      for (const r of found) existing.add(r.student_id);
+    }
+    const toCreate = [];
+    for (const r of valid) {
+      if (existing.has(r.student_id)) {
+        skipped.push({ student_id: r.student_id, name: r.name, reason: 'An account already exists with this Student ID — skipped.' });
+      } else toCreate.push(r);
+    }
+
+    // 3 · usernames allocated in memory against a preloaded collision set
+    const takenLc = new Set();
+    const bases = [...new Set(toCreate.map((r) => usernameBase(r.name)))];
+    for (let i = 0; i < bases.length; i += 40) {
+      const chunk = bases.slice(i, i + 40);
+      const where = chunk.map(() => 'username LIKE ? COLLATE NOCASE').join(' OR ');
+      const found = await this.db.prepare(`SELECT username FROM users WHERE ${where}`)
+        .all(...chunk.map((b) => `${b}%`));
+      for (const r of found) takenLc.add(r.username.toLowerCase());
+    }
+
+    // 4 · the shared default password is hashed ONCE (scrypt is expensive —
+    //    hashing per row was the mid-batch timeout killer on Workers)
+    const hash = hashPassword(password);
+    const now = nowIso();
+    const created = [];
+    const stmts = toCreate.map((r) => {
+      const username = allocateUsername(usernameBase(r.name), takenLc);
+      takenLc.add(username.toLowerCase());
+      created.push({ name: r.name, student_id: r.student_id, username });
+      return {
+        sql: `INSERT INTO users (role, full_name, username, email, password_hash, is_active, student_id, academic_level, created_at, updated_at)
+              VALUES ('student', ?, ?, NULL, ?, 1, ?, ?, ?, ?)`,
+        params: [r.name, username, hash, r.student_id, level, now, now],
+      };
+    });
+
+    // 5 · one round trip (D1 batch) or one transaction (Node)
+    if (stmts.length) {
+      if (typeof this.db.batch === 'function') await this.db.batch(stmts);
+      else await this.db.transaction(async () => {
+        for (const s of stmts) await this.db.prepare(s.sql).run(...s.params);
+      });
+    }
+
     return {
       created_count: created.length, skipped_count: skipped.length, invalid_count: invalid.length,
       created, skipped, invalid,

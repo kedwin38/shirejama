@@ -10,6 +10,19 @@ export class D1Port {
     await this.db.exec(sql);
   }
 
+  /**
+   * One-round-trip multi-statement write: [{sql, params}] → D1 batch().
+   * Falls back to sequential execution when the adapter underneath has no
+   * native batch (the Node port runs statements inside a transaction).
+   */
+  async batch(statements) {
+    if (typeof this.db.batch === 'function') {
+      await this.db.batch(statements.map((s) => this.db.prepare(s.sql).bind(...s.params)));
+      return;
+    }
+    for (const s of statements) await this.prepare(s.sql).run(...s.params);
+  }
+
   prepare(sql) {
     const stmt = this.db.prepare(sql);
     return {
