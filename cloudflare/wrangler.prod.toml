@@ -24,3 +24,8 @@ bucket_name = "shirejama-media"
 
 [triggers]
 crons = ["*/30 * * * *"]
+
+# Production custom domain (attached at account level; kept here as documentation of record)
+routes = [
+  { pattern = "shirejamaschools.com", custom_domain = true }
+]
