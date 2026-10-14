@@ -129,6 +129,43 @@ async function handleApi(request, env, pathName) {
   }
 }
 
+/** Origin for absolute SEO URLs (custom domain first, workers.dev fallback). */
+const SEO_ORIGIN = 'https://shirejamaschools.com';
+
+/**
+ * Subliminal SEO layer — crawler-facing routes served by the Worker with
+ * correct content types. Everything else stays on Workers Assets.
+ *  · /robots.txt  — crawl contract: public shell indexable, API + gate excluded
+ *  · /sitemap.xml — dynamic: public pages now, published-course catalog later
+ *                   (lastmod reflects the newest content change in D1)
+ */
+function seoRoutes(pathName) {
+  if (pathName === '/robots.txt') {
+    const body = `# Shire Jama'a Ahmed Adult School — crawler contract\n` +
+      `User-agent: *\n` +
+      `Allow: /\n` +
+      `Disallow: /api/\n` +
+      `\n` +
+      `Sitemap: ${SEO_ORIGIN}/sitemap.xml\n`;
+    return new Response(body, { headers: { 'content-type': 'text/plain;charset=utf-8', 'cache-control': 'public, max-age=3600' } });
+  }
+  if (pathName === '/sitemap.xml') {
+    const today = new Date().toISOString().slice(0, 10);
+    const urls = [
+      { loc: `${SEO_ORIGIN}/`, priority: '1.0', changefreq: 'weekly', lastmod: today },
+      // Future: one entry per published course (/courses/<id>) — the
+      // programmatic-SEO surface that grows with the school's catalog.
+    ];
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>\n` +
+      `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n` +
+      urls.map((u) => `  <url>\n    <loc>${u.loc}</loc>\n    <lastmod>${u.lastmod}</lastmod>\n` +
+        `    <changefreq>${u.changefreq}</changefreq>\n    <priority>${u.priority}</priority>\n  </url>`).join('\n') +
+      `\n</urlset>\n`;
+    return new Response(xml, { headers: { 'content-type': 'application/xml;charset=utf-8', 'cache-control': 'public, max-age=3600' } });
+  }
+  return null;
+}
+
 export default {
   async fetch(request, env, execCtx) {
     if (!wiring) {
@@ -137,6 +174,12 @@ export default {
     }
 
     const url = new URL(request.url);
+
+    // Crawler-facing SEO routes (served before assets so they never fall
+    // through to the SPA fallback, which would poison them with HTML).
+    const seo = seoRoutes(url.pathname);
+    if (seo) return seo;
+
     if (!url.pathname.startsWith('/api/')) {
       // The frontend is a hash-router SPA (routes live in location.hash,
       // which the server never sees) — served by Workers Assets with SPA
@@ -144,7 +187,10 @@ export default {
       // unlimited and never invoke this Worker.
       return env.ASSETS.fetch(request);
     }
-    return await handleApi(request, env, url.pathname);
+    const res = await handleApi(request, env, url.pathname);
+    // The API is private machinery — keep it out of the index entirely.
+    res.headers.set('X-Robots-Tag', 'noindex, nofollow');
+    return res;
   },
 
   // Cron trigger (every 30 minutes) — Workers has no persistent setInterval
