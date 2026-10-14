@@ -5,7 +5,7 @@ import { el, icons, toast, confirmDialog, openModal,
          uploadWithProgress, downloadCsv } from '../lib/ui.js';
 
 export const TEACHER_NAV = [
-  { label: 'My Courses', path: '/teacher', icon: 'book' },
+  { label: 'My Subjects', path: '/teacher', icon: 'book' },
   { label: 'Submissions', path: '/teacher/submissions', icon: 'inbox' },
 ];
 const LEVELS = ['C1','C2','C3','C4','C5','C6','C7','C8','F1','F2','F3','F4'];
@@ -20,7 +20,7 @@ export async function renderTeacher(main, route) {
     if (e.status === 404 || e.status === 403) {
       main.replaceChildren(el('div', { class: 'empty' }, el('div', { class: 'e-ico' }, icons.xCircle()),
         el('h4', {}, 'Not available'), el('p', {}, e.message),
-        el('a', { class: 'btn ghost', href: '#/teacher' }, 'Back to my courses')));
+        el('a', { class: 'btn ghost', href: '#/teacher' }, 'Back to my subjects')));
     } else throw e;
   }
 }
@@ -32,17 +32,17 @@ async function renderCourseList(main) {
     el('div', { class: 'page-head' },
       el('div', {},
         el('div', { class: 'eyebrow' }, 'Teacher Portal'),
-        el('h1', {}, 'My Courses'),
-        el('div', { class: 'head-sub' }, 'You author, own, and control exactly these courses.')),
+        el('h1', {}, 'My Subjects'),
+        el('div', { class: 'head-sub' }, 'You author, own, and control exactly these subjects.')),
       el('div', { class: 'head-actions' },
         el('button', { class: 'btn primary', onclick: () => createCourse(main) },
-          el('span', { class: 'ic' }, icons.plus()), 'New course'))),
+          el('span', { class: 'ic' }, icons.plus()), 'New subject'))),
     courses.length === 0
       ? el('div', { class: 'card frame' }, el('div', { class: 'empty' },
           el('div', { class: 'e-ico' }, icons.book()),
           el('h4', {}, 'Your shelf is empty'),
-          el('p', {}, 'Create your first course — title it, describe it, and tag the academic levels it serves.'),
-          el('button', { class: 'btn primary', onclick: () => createCourse(main) }, el('span', { class: 'ic' }, icons.plus()), 'Create a course')))
+          el('p', {}, 'Create your first subject — title it, describe it, and tag the academic levels it serves.'),
+          el('button', { class: 'btn primary', onclick: () => createCourse(main) }, el('span', { class: 'ic' }, icons.plus()), 'Create a subject')))
       : el('div', { class: 'course-grid' }, courses.map((c) =>
           el('div', { class: 'card frame course-card' },
             el('div', { class: 'cc-band' }),
@@ -73,12 +73,12 @@ function levelPickerV2(selected = []) {
 function createCourse(main) {
   openModal((card, done) => {
     const title = el('input', { class: 'input', placeholder: 'e.g. English Foundations: Reading & Writing', 'data-autofocus': true });
-    const desc = el('textarea', { class: 'input', placeholder: 'What will learners gain from this course?' });
+    const desc = el('textarea', { class: 'input', placeholder: 'What will learners gain from this subject?' });
     const res = el('input', { class: 'input mono', placeholder: 'https://… (optional — for media hosted elsewhere)', value: '' });
     const levels = levelPickerV2();
     const err = el('div', { class: 'err-line' });
     card.append(
-      el('div', { class: 'modal-head' }, el('h3', {}, 'New Course'),
+      el('div', { class: 'modal-head' }, el('h3', {}, 'New Subject'),
         el('button', { class: 'icon-btn x', onclick: done }, icons.x())),
       el('div', { class: 'modal-body' },
         el('div', { class: 'field' }, el('label', {}, 'TITLE ', el('span', { class: 'req' }, '*')), title),
@@ -86,7 +86,7 @@ function createCourse(main) {
         el('div', { class: 'field' }, el('label', {}, 'LEARNING MATERIAL LINK (OPTIONAL)'), res,
           el('div', { class: 'hint' }, 'Where students access the material if it is hosted elsewhere (Google Drive, YouTube, a school portal…).')),
         el('div', { class: 'field' }, el('label', {}, 'ACADEMIC LEVELS ', el('span', { class: 'req' }, '*')), levels.node,
-          el('div', { class: 'hint' }, 'Only students at these levels will see the course.')),
+          el('div', { class: 'hint' }, 'Only students at these levels will see the subject.')),
         err),
       el('div', { class: 'modal-foot' },
         el('button', { class: 'btn ghost', onclick: done }, 'Cancel'),
@@ -96,10 +96,10 @@ function createCourse(main) {
             const { course } = await api.post('/api/teacher/courses', {
               title: title.value, description: desc.value,
               resource_url: res.value || undefined, levels: levels.value() });
-            toast('Course created.', 'ok'); done();
+            toast('Subject created.', 'ok'); done();
             location.hash = `#/teacher/courses/${course.id}`;
           } catch (e) { err.textContent = e.message; }
-        } }, el('span', { class: 'ic' }, icons.plus()), 'Create course')),
+        } }, el('span', { class: 'ic' }, icons.plus()), 'Create subject')),
     );
   });
 }
@@ -111,14 +111,14 @@ async function renderStudio(main, courseId) {
   main.replaceChildren(
     el('div', { class: 'page-head' },
       el('div', {},
-        el('div', { class: 'eyebrow' }, 'Course Studio'),
+        el('div', { class: 'eyebrow' }, 'Subject Studio'),
         el('h1', {}, course.title),
         el('div', { class: 'head-sub' }, course.description || '')),
       el('div', { class: 'head-actions' },
         el('button', { class: 'btn', onclick: () => courseAnalytics(course) },
-          el('span', { class: 'ic' }, icons.chart()), 'Course analytics'),
+          el('span', { class: 'ic' }, icons.chart()), 'Subject analytics'),
         el('button', { class: 'btn ghost', onclick: () => editCourse(course) }, el('span', { class: 'ic' }, icons.edit()), 'Edit details'),
-        el('button', { class: 'btn danger-ghost', onclick: () => deleteCourse(course) }, el('span', { class: 'ic' }, icons.trash()), 'Delete course'))),
+        el('button', { class: 'btn danger-ghost', onclick: () => deleteCourse(course) }, el('span', { class: 'ic' }, icons.trash()), 'Delete subject'))),
     el('div', { class: 'row wrap mb-2' },
       course.levels.map((l) => el('span', { class: 'chip gold mono' }, LEVEL_LABELS[l])),
       el('span', { class: 'chip neutral' }, `${course.chapters.length} chapters`),
@@ -152,7 +152,7 @@ function chapterBlock(course, h) {
             } }, icons.trash())));
       }
       return el('div', { class: 'res-row' + (m.kind === 'video' ? ' rr-video' : '') },
-        el('div', { class: 'rr-ico' }, m.kind === 'video' ? icons.video() : icons.pdf()),
+        el('div', { class: 'rr-ico' }, m.kind === 'video' ? icons.video() : m.kind === 'docx' ? icons.file() : icons.pdf()),
         el('div', { class: 'rr-main' },
           el('div', { class: 'rr-title' }, m.title),
           el('div', { class: 'rr-sub' },
@@ -293,7 +293,7 @@ function editCourse(course) {
     const levels = levelPickerV2(course.levels);
     const err = el('div', { class: 'err-line' });
     card.append(
-      el('div', { class: 'modal-head' }, el('h3', {}, 'Edit Course'), el('button', { class: 'icon-btn x', onclick: done }, icons.x())),
+      el('div', { class: 'modal-head' }, el('h3', {}, 'Edit Subject'), el('button', { class: 'icon-btn x', onclick: done }, icons.x())),
       el('div', { class: 'modal-body' },
         el('div', { class: 'field' }, el('label', {}, 'TITLE'), title),
         el('div', { class: 'field' }, el('label', {}, 'DESCRIPTION'), desc),
@@ -305,7 +305,7 @@ function editCourse(course) {
           try {
             await api.patch(`/api/teacher/courses/${course.id}`, {
               title: title.value, description: desc.value, resource_url: res.value, levels: levels.value() });
-            toast('Course updated.', 'ok'); done(); document.dispatchEvent(new CustomEvent('reload-view'));
+            toast('Subject updated.', 'ok'); done(); document.dispatchEvent(new CustomEvent('reload-view'));
           } catch (e) { err.textContent = e.message; }
         } }, 'Save changes')),
     );
@@ -313,13 +313,13 @@ function editCourse(course) {
 }
 
 async function deleteCourse(course) {
-  const ok = await confirmDialog({ title: `Delete “${course.title}” entirely?`, danger: true, confirmLabel: 'Delete course forever',
+  const ok = await confirmDialog({ title: `Delete “${course.title}” entirely?`, danger: true, confirmLabel: 'Delete subject forever',
     body: el('div', {},
       el('p', {}, 'This permanently removes ', el('b', {}, 'all chapters, materials, quizzes and recorded student grades'),
         ' for this course, along with every stored file. This is a real server deletion — there is no undo.') ) });
   if (!ok) return;
   await api.delete(`/api/teacher/courses/${course.id}`);
-  toast('Course deleted.', 'ok');
+  toast('Subject deleted.', 'ok');
   location.hash = '#/teacher';
 }
 
@@ -464,19 +464,21 @@ function uploadMaterial(course, h) {
     const title = el('input', { class: 'input', placeholder: 'Material title' });
     const desc = el('input', { class: 'input', placeholder: 'Optional description' });
     const allow = el('input', { type: 'checkbox' });
-    const fileInput = el('input', { type: 'file', accept: '.pdf,video/mp4,video/webm,video/quicktime,.mp4,.webm,.mov,.m4v', style: 'display:none' });
+    const fileInput = el('input', { type: 'file', accept: '.pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,video/mp4,video/webm,video/quicktime,.mp4,.webm,.mov,.m4v', style: 'display:none' });
     const drop = el('div', { class: 'dropzone', tabindex: '0', role: 'button', onclick: () => fileInput.click(),
       onkeydown: (e) => { if (e.key === 'Enter') fileInput.click(); } },
-      icons.upload(), el('div', {}, el('b', {}, 'Choose a PDF or video'), el('div', { class: 'hint' }, 'PDF up to 100 MB · MP4/WebM/MOV up to 2 GB')));
+      icons.upload(), el('div', {}, el('b', {}, 'Choose a PDF, Word document or video'), el('div', { class: 'hint' }, 'PDF or DOCX up to 100 MB · MP4/WebM/MOV up to 2 GB')));
     const bar = el('div', { class: 'upbar', style: 'display:none' }, el('i', { style: 'width:0%' }));
     const pct = el('div', { class: 'hint mono' });
     const err = el('div', { class: 'err-line' });
-    const kindOf = (f) => /\.pdf$/i.test(f.name) || f.type === 'application/pdf' ? 'pdf' : 'video';
+    const kindOf = (f) => /\.docx$/i.test(f.name) || f.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+      ? 'docx'
+      : (/\.pdf$/i.test(f.name) || f.type === 'application/pdf' ? 'pdf' : 'video');
 
     fileInput.addEventListener('change', () => {
       file = fileInput.files[0];
       if (file) {
-        drop.replaceChildren(icons[kindOf(file) === 'pdf' ? 'pdf' : 'video'](),
+        drop.replaceChildren(icons[kindOf(file) === 'docx' ? 'file' : (kindOf(file) === 'pdf' ? 'pdf' : 'video')](),
           el('div', {}, el('b', {}, file.name), el('div', { class: 'hint' }, `${fmtBytes(file.size)} · will be uploaded as ${kindOf(file).toUpperCase()}`)));
         if (!title.value) title.value = file.name.replace(/\.[a-z0-9]+$/i, '');
       }
@@ -764,7 +766,7 @@ async function renderSubmissions(main) {
             el('div', { style: 'font-weight:600' }, g.name),
             el('div', { class: 'faint mono', style: 'font-size:11px' }, g.code || '—')),
           el('span', { class: 'chip neutral' }, `${g.attempts} attempt${g.attempts === 1 ? '' : 's'}`),
-          el('span', { class: 'chip neutral' }, `${g.courses.length} course${g.courses.length === 1 ? '' : 's'}`),
+          el('span', { class: 'chip neutral' }, `${g.courses.length} subject${g.courses.length === 1 ? '' : 's'}`),
           g.pending > 0
             ? el('span', { class: 'chip warn' }, `${g.pending} awaiting you`)
             : el('span', { class: 'chip ok' }, 'up to date')),
@@ -799,11 +801,11 @@ async function renderSubmissions(main) {
       el('div', {},
         el('div', { class: 'eyebrow' }, 'Assessment'),
         el('h1', {}, 'Student Submissions'),
-        el('div', { class: 'head-sub' }, 'Every attempt from your courses — review answers, score document tasks, release results.')),
+        el('div', { class: 'head-sub' }, 'Every attempt from your subjects — review answers, score document tasks, release results.')),
       el('div', { class: 'head-actions' },
         el('button', { class: 'btn ghost', onclick: () => {
           downloadCsv('submissions.csv',
-            ['Student', 'Student ID', 'Quiz', 'Course', 'Attempt', 'Status', 'Submitted', 'Score', 'Max'],
+            ['Student', 'Student ID', 'Quiz', 'Subject', 'Attempt', 'Status', 'Submitted', 'Score', 'Max'],
             lastRows.map((s) => [s.student_name, s.student_code, s.quiz_title, s.course_title,
               `#${s.attempt_no}`, s.status, s.submitted_at ?? '', s.score ?? '', s.max_score]));
           toast('submissions.csv exported.', 'ok', 2500);

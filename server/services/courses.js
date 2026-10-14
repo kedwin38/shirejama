@@ -259,14 +259,14 @@ export class CourseService {
   // ── Materials (FR-4.4 / FR-4.5) ─────────────────────────────────────────
   async addMaterial(teacherId, chapterId, meta, req) {
     const h = await this._chapterOwned(teacherId, chapterId);
-    const kind = meta.kind === 'video' ? 'video' : meta.kind === 'pdf' ? 'pdf' : null;
-    if (!kind) throw badRequest('Material kind must be "pdf" or "video".');
+    const kind = ['video','pdf','docx'].includes(meta.kind) ? meta.kind : null;
+    if (!kind) throw badRequest('Material kind must be "pdf", "docx" or "video".');
     const title = reqString(meta.title, 'title', { min: 3, max: 160 });
     const description = String(meta.description ?? '').trim().slice(0, 1000);
     const allowDownload = meta.allow_download === '1' || meta.allow_download === 'true' ? 1 : 0;
 
     const rec = await this.vault.receive(req, kind, meta.name || title, {
-      category: kind === 'pdf' ? 'materialPdf' : 'materialVideo',
+      category: kind === 'video' ? 'materialVideo' : 'materialPdf',
     });
     const { lastId } = await this.db.prepare(`
       INSERT INTO materials (chapter_id, kind, title, description, file_name, stored_path, mime, size_bytes, allow_download, created_at)

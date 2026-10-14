@@ -7,6 +7,19 @@ export class D1Port {
   }
 
   async exec(sql) {
+    // D1's raw exec() splits statements naively and rejects multi-line DDL
+    // ("incomplete input"). Split on statement boundaries ourselves and run
+    // one atomic batch instead — same all-or-nothing semantics, and prepared
+    // statements happily span lines.
+    if (typeof this.db.batch === 'function') {
+      const stmts = sql
+        .split(/;\s*\n/)
+        .map((s) => s.trim().replace(/;$/, ''))
+        .filter(Boolean)
+        .map((s) => this.db.prepare(s));
+      if (stmts.length) await this.db.batch(stmts);
+      return;
+    }
     await this.db.exec(sql);
   }
 

@@ -27,6 +27,9 @@ export async function pendingMigrations(db) {
   ).get();
   if (matSql && (!matSql.sql.includes("'link'") || !linkUrlCol)) out.push('materials_link');
 
+  // 2b · materials: 'docx' kind (Word documents)
+  if (matSql && matSql.sql.includes("'link'") && !matSql.sql.includes("'docx'")) out.push('materials_docx');
+
   // 3 · courses.resource_url (plain ADD COLUMN — no constraint changes)
   const courseCol = await db.prepare(
     `SELECT 1 FROM pragma_table_info('courses') WHERE name = 'resource_url'`
@@ -100,6 +103,35 @@ export function migrationSql(name) {
          FROM materials;`,
         'DROP TABLE materials;',
         'ALTER TABLE materials_mig RENAME TO materials;',
+        'CREATE INDEX IF NOT EXISTS idx_materials_chapter ON materials(chapter_id);',
+      ].join('\n');
+
+    case 'materials_docx':
+      // Widen the kind CHECK to admit Word documents. Same rebuild pattern —
+      // materials has no inbound foreign keys, so the drop/rename is safe.
+      return [
+        `CREATE TABLE materials_docx_mig (
+           id             INTEGER PRIMARY KEY AUTOINCREMENT,
+           chapter_id     INTEGER NOT NULL REFERENCES chapters(id) ON DELETE CASCADE,
+           kind           TEXT NOT NULL CHECK (kind IN ('pdf','docx','video','link')),
+           title          TEXT NOT NULL,
+           description    TEXT NOT NULL DEFAULT '',
+           file_name      TEXT NOT NULL DEFAULT '',
+           stored_path    TEXT,
+           mime           TEXT NOT NULL DEFAULT '',
+           size_bytes     INTEGER NOT NULL DEFAULT 0,
+           allow_download INTEGER NOT NULL DEFAULT 0,
+           link_url       TEXT,
+           created_at     TEXT NOT NULL
+         );`,
+        `INSERT INTO materials_docx_mig (id, chapter_id, kind, title, description, file_name,
+            stored_path, mime, size_bytes, allow_download, link_url, created_at)
+         SELECT id, chapter_id, kind, title, description, file_name,
+            stored_path, mime, size_bytes, allow_download,
+            link_url, created_at
+         FROM materials;`,
+        'DROP TABLE materials;',
+        'ALTER TABLE materials_docx_mig RENAME TO materials;',
         'CREATE INDEX IF NOT EXISTS idx_materials_chapter ON materials(chapter_id);',
       ].join('\n');
 

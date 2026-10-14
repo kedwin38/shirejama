@@ -1,5 +1,17 @@
 // ── File vault routes (FR-6.x) — every byte is permission-checked ────────
-import { notFound } from '../core/errors.js';
+import { notFound, unauthorized } from '../core/errors.js';
+
+/** When a human's browser (not the app's fetch) hits a denied file, send
+ *  them somewhere helpful instead of raw JSON — this is what a phone's
+ *  PDF viewer sees when a session has expired mid-lesson. */
+function humanFriendlyDenial(req, message) {
+  const accept = req.headers?.get?.('accept') ?? '';
+  const wantsHtml = accept.includes('text/html') && !accept.includes('application/json');
+  if (wantsHtml) {
+    return new Response(null, { status: 302, headers: { location: '/#/gate' } });
+  }
+  return unauthorized(message);
+}
 
 export function registerFileRoutes(router, ctx) {
   const { services } = ctx;
@@ -11,20 +23,23 @@ export function registerFileRoutes(router, ctx) {
   /**
    * FR-6.2 — course material. Students: only if the course matches their
    * level. Teachers: only the owner. Admins: always. ?download=1 additionally
-   * requires the teacher to have allowed downloads (FR-4.4).
+   * requires the teacher to have allowed downloads (FR-4.4). Word documents
+   * are always served as downloads — browsers cannot render .docx inline.
    */
   router.get('/api/files/material/:id', async (req, res, c) => {
     const m = await vault.materialContext(Number(c.params.id));
     if (!m) throw notFound('Material not found.');
     const { user } = c;
-    let allowed = user?.role === 'admin' || (user?.role === 'teacher' && user.id === m.teacher_id);
+    if (!user) return humanFriendlyDenial(req, 'Your session has expired — sign in again to open this material.');
+    let allowed = user.role === 'admin' || (user.role === 'teacher' && user.id === m.teacher_id);
     if (!allowed && await isStudentOfCourse(user, m.course_id)) allowed = true;
-    if (!allowed) throw notFound('Material not found.');
+    if (!allowed) return humanFriendlyDenial(req, 'This material belongs to a subject outside your class.');
 
     const wantsDownload = c.query.download === '1';
+    const isDocx = m.kind === 'docx';
     return await ctx.serveFile(req, res, {
       path: m.stored_path, mime: m.mime, size: m.size_bytes, fileName: m.file_name,
-      download: wantsDownload && m.allow_download === 1,
+      download: isDocx || (wantsDownload && m.allow_download === 1),
     });
   });
 

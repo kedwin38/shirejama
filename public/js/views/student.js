@@ -34,12 +34,12 @@ async function renderCatalog(main) {
         el('div', { class: 'eyebrow' }, 'Student Learning Portal'),
         el('h1', {}, 'My Learning'),
         el('div', { class: 'head-sub' },
-          `Every course for your level — ${LEVEL_LABELS[window.SJ_USER?.academic_level] || ''}. Mark chapters done as you progress.`))),
+          `Every subject for your level — ${LEVEL_LABELS[window.SJ_USER?.academic_level] || ''}. Mark chapters done as you progress.`))),
     courses.length === 0
       ? el('div', { class: 'card frame' }, el('div', { class: 'empty' },
           el('div', { class: 'e-ico' }, icons.book()),
-          el('h4', {}, 'No courses for your level yet'),
-          el('p', {}, 'When your teachers publish courses for your class or form, they will appear here automatically.')))
+          el('h4', {}, 'No subjects for your level yet'),
+          el('p', {}, 'When your teachers publish subjects for your class or form, they will appear here automatically.')))
       : el('div', { class: 'course-grid' }, courses.map(courseCard)),
   );
 }
@@ -100,7 +100,7 @@ async function renderCourse(main, courseId) {
   main.replaceChildren(
     el('div', { class: 'page-head' },
       el('div', {},
-        el('div', { class: 'eyebrow' }, 'Course'),
+        el('div', { class: 'eyebrow' }, 'Subject'),
         el('h1', {}, course.title),
         el('div', { class: 'head-sub' }, course.description || '')),
       el('div', { class: 'head-actions' },
@@ -112,7 +112,7 @@ async function renderCourse(main, courseId) {
     ...(course.resource_url ? [el('a', {
       class: 'btn gold-ghost mb-2', href: course.resource_url, target: '_blank', rel: 'noopener',
       style: 'display:inline-flex',
-    }, el('span', { class: 'ic' }, icons.grid()), 'Open the course learning material ↗')] : []),
+    }, el('span', { class: 'ic' }, icons.grid()), 'Open the subject learning material ↗')] : []),
     ...(chapters.length === 0
       ? [el('div', { class: 'card frame' }, el('div', { class: 'empty' }, el('div', { class: 'e-ico' }, icons.layers()),
           el('h4', {}, 'Chapters coming soon'), el('p', {}, 'Your teacher is still preparing this course.')))]
@@ -139,8 +139,17 @@ function materialRow(m) {
   }
 
   const isVideo = m.kind === 'video';
+  const isDocx = m.kind === 'docx';
   const posKey = `sj-video-pos-${m.id}`;
-  const openIt = () => openTheater((card, close) => {
+  // Phones render PDFs poorly (or not at all) inside iframes — hand PDF and
+  // DOCX files to the device's native viewer/download via a real navigation.
+  const isPhone = matchMedia('(pointer: coarse)').matches;
+  const openIt = () => {
+    if (isDocx || (m.kind === 'pdf' && isPhone)) {
+      window.open(`/api/files/material/${m.id}`, '_blank');
+      return;
+    }
+    return openTheater((card, close) => {
     const stage = el('div', { class: 'theater-stage' },
       isVideo
         ? (() => {
@@ -175,17 +184,20 @@ function materialRow(m) {
       stage,
     );
   });
+  };
+  const kindLabel = isDocx ? 'Word document' : isVideo ? 'Video lecture' : 'PDF reading';
+  const actionLabel = isDocx ? 'Open' : isVideo ? 'Watch' : (isPhone ? 'Open' : 'Read');
   return el('div', { class: 'res-row' + (isVideo ? ' rr-video' : '') },
-    el('div', { class: 'rr-ico' }, isVideo ? icons.video() : icons.pdf()),
+    el('div', { class: 'rr-ico' }, isVideo ? icons.video() : isDocx ? icons.file() : icons.pdf()),
     el('div', { class: 'rr-main' },
       el('div', { class: 'rr-title' }, m.title),
       el('div', { class: 'rr-sub' },
-        el('span', {}, isVideo ? 'Video lecture' : 'PDF reading'),
+        el('span', {}, kindLabel),
         el('span', { class: 'mono' }, fmtBytes(m.size_bytes)),
         m.description && el('span', {}, m.description))),
     el('div', { class: 'rr-actions' },
       el('button', { class: 'btn sm primary', onclick: openIt },
-        el('span', { class: 'ic' }, isVideo ? icons.play() : icons.eye()), isVideo ? 'Watch' : 'Read')));
+        el('span', { class: 'ic' }, isVideo ? icons.play() : isDocx ? icons.download() : icons.eye()), actionLabel)));
 }
 
 function quizRow(z, course) {
@@ -455,7 +467,7 @@ async function renderResults(main, attemptId) {
     return;
   }
   const { attempts } = await api.get('/api/student/results');
-  const headRow = el('tr', {}, ['Quiz', 'Course', 'Attempt', 'Submitted', 'Score', 'Status', ''].map((h) => el('th', {}, h)));
+  const headRow = el('tr', {}, ['Quiz', 'Subject', 'Attempt', 'Submitted', 'Score', 'Status', ''].map((h) => el('th', {}, h)));
   const rows = attempts.map((a) => {
     const statusCell = a.status === 'released'
       ? el('span', { class: 'chip ok' }, 'Released')

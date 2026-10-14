@@ -66,7 +66,7 @@ CREATE INDEX IF NOT EXISTS idx_chapters_course ON chapters(course_id, position);
 CREATE TABLE IF NOT EXISTS materials (
   id             INTEGER PRIMARY KEY AUTOINCREMENT,
   chapter_id     INTEGER NOT NULL REFERENCES chapters(id) ON DELETE CASCADE,
-  kind           TEXT NOT NULL CHECK (kind IN ('pdf','video','link')),
+  kind           TEXT NOT NULL CHECK (kind IN ('pdf','docx','video','link')),
   title          TEXT NOT NULL,
   description    TEXT NOT NULL DEFAULT '',
   file_name      TEXT NOT NULL DEFAULT '',

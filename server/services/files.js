@@ -82,6 +82,7 @@ export class FileVault {
 
     const validators = {
       pdf: (b) => sniff.pdf(b),
+      docx: (b) => starts(b, [0x50, 0x4b, 0x03, 0x04]),
       video: (b) => sniff.video(b),
       image: (b) => sniff.image(b),
       attachment: (b) => sniff.pdf(b) || sniff.image(b)
@@ -93,13 +94,14 @@ export class FileVault {
       try { unlinkSync(staged); } catch {}
       throw new AppError(415, 'unsupported_media',
         kind === 'pdf' ? 'This file is not a valid PDF (its contents failed the PDF signature check).'
+        : kind === 'docx' ? 'This file is not a valid Word document (.docx).'
         : kind === 'video' ? 'This file is not a recognized video container (MP4, WebM, MOV…).'
         : kind === 'image' ? 'This file is not a recognized image (PNG, JPEG, GIF, WebP).'
         : 'This file type is not accepted here (allowed: PDF, Word documents, or images).');
     }
 
     const dir = {
-      pdf: this.dirs.materials, video: this.dirs.materials,
+      pdf: this.dirs.materials, docx: this.dirs.materials, video: this.dirs.materials,
       image: this.dirs.questions, attachment: this.dirs.questions,
       answer: this.dirs.answers,
     }[kind];
@@ -108,6 +110,7 @@ export class FileVault {
 
     const mime = ({
       pdf: 'application/pdf',
+      docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       video: ext === 'webm' ? 'video/webm' : ext === 'mov' ? 'video/quicktime' : 'video/mp4',
       image: head[0] === 0x89 ? 'image/png' : head[0] === 0xff ? 'image/jpeg'
         : head[0] === 0x47 ? 'image/gif' : 'image/webp',

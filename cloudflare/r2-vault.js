@@ -19,6 +19,8 @@ const latin1 = (buf, start, end) => {
 
 const sniff = {
   pdf: (b) => latin1(b, 0, 5) === '%PDF-',
+  // DOCX/XLSX/PPTX are ZIP packages — validated by the PK\x03\x04 signature.
+  docx: (b) => starts(b, [0x50, 0x4b, 0x03, 0x04]),
   video: (b) => {
     if (b.length >= 12 && latin1(b, 4, 8) === 'ftyp') {
       const brand = latin1(b, 8, 12).toLowerCase();
@@ -37,6 +39,8 @@ const sniff = {
     || starts(b, [0x50, 0x4b, 0x03, 0x04])
     || sniff.image(b),
 };
+
+const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
 const SAFE_EXT = /^[a-z0-9]{1,6}$/i;
 const PREFIX = { materials: 'materials', questions: 'questions', answers: 'answers' };
@@ -109,6 +113,7 @@ export class R2Vault {
 
     const validators = {
       pdf: (b) => sniff.pdf(b),
+      docx: (b) => sniff.docx(b),
       video: (b) => sniff.video(b),
       image: (b) => sniff.image(b),
       attachment: (b) => sniff.pdf(b) || sniff.image(b)
@@ -120,6 +125,7 @@ export class R2Vault {
       await storeBranch.pipeTo(new WritableStream()).catch(() => {}); // drain, don't store
       throw new AppError(415, 'unsupported_media',
         kind === 'pdf' ? 'This file is not a valid PDF (its contents failed the PDF signature check).'
+        : kind === 'docx' ? 'This file is not a valid Word document (.docx).'
         : kind === 'video' ? 'This file is not a recognized video container (MP4, WebM, MOV…).'
         : kind === 'image' ? 'This file is not a recognized image (PNG, JPEG, GIF, WebP).'
         : 'This file type is not accepted here (allowed: PDF, Word documents, or images).');
@@ -127,20 +133,21 @@ export class R2Vault {
 
     const mime = ({
       pdf: 'application/pdf',
+      docx: DOCX_MIME,
       video: ext === 'webm' ? 'video/webm' : ext === 'mov' ? 'video/quicktime' : 'video/mp4',
       image: head[0] === 0x89 ? 'image/png' : head[0] === 0xff ? 'image/jpeg'
         : head[0] === 0x47 ? 'image/gif' : 'image/webp',
       attachment: sniff.pdf(head) ? 'application/pdf'
         : sniff.image(head) ? (head[0] === 0x89 ? 'image/png' : 'image/jpeg')
-        : starts(head, [0x50, 0x4b]) ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        : starts(head, [0x50, 0x4b]) ? DOCX_MIME
         : 'application/msword',
       answer: sniff.pdf(head) ? 'application/pdf'
         : sniff.image(head) ? (head[0] === 0x89 ? 'image/png' : 'image/jpeg')
-        : starts(head, [0x50, 0x4b]) ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        : starts(head, [0x50, 0x4b]) ? DOCX_MIME
         : 'application/msword',
     })[kind];
 
-    const dir = { pdf: PREFIX.materials, video: PREFIX.materials,
+    const dir = { pdf: PREFIX.materials, docx: PREFIX.materials, video: PREFIX.materials,
       image: PREFIX.questions, attachment: PREFIX.questions, answer: PREFIX.answers }[kind];
     const key = `${dir}/${randomUUID()}.${ext}`;
 
