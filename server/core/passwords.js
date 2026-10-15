@@ -1,21 +1,32 @@
 // ── Password hashing (scrypt) + institutional password policy (FR-1.6) ──
+// Two cost tiers, chosen by tag:
+//   s1$ — N=16384 (legacy; still verified, never minted)
+//   s2$ — N=8192  (current) — halves login CPU on edge runtimes where the
+//         free-tier CPU budget kills ~100ms verifications intermittently,
+//         which users experienced as sign-in "timeouts".
 import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 
-const SCRYPT = { N: 16384, r: 8, p: 1, keylen: 64 };
+const TIERS = {
+  s1: { N: 16384, r: 8, p: 1, keylen: 64 },
+  s2: { N: 8192, r: 8, p: 1, keylen: 64 },
+};
+const MINT = 's2';
 
 export function hashPassword(password) {
   const salt = randomBytes(16);
-  const key = scryptSync(password, salt, SCRYPT.keylen, SCRYPT);
-  return `s1$${salt.toString('hex')}$${key.toString('hex')}`;
+  const t = TIERS[MINT];
+  const key = scryptSync(password, salt, t.keylen, t);
+  return `${MINT}$${salt.toString('hex')}$${key.toString('hex')}`;
 }
 
 export function verifyPassword(password, stored) {
   try {
     const [tag, saltHex, keyHex] = String(stored).split('$');
-    if (tag !== 's1' || !saltHex || !keyHex) return false;
+    const t = TIERS[tag];
+    if (!t || !saltHex || !keyHex) return false;
     const salt = Buffer.from(saltHex, 'hex');
     const expected = Buffer.from(keyHex, 'hex');
-    const actual = scryptSync(password, salt, expected.length, SCRYPT);
+    const actual = scryptSync(password, salt, expected.length, t);
     return timingSafeEqual(actual, expected);
   } catch {
     return false;

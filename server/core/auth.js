@@ -51,16 +51,17 @@ export class SessionStore {
     };
   }
 
-  /** Sliding expiry; throttled to one write per 60 s per session. */
+  /** Sliding expiry; throttled to one write per 60 s per session.
+   *  Single statement — the previous SELECT-then-UPDATE paid two database
+   *  round trips on EVERY authenticated request (very noticeable when the
+   *  database lives a continent away from the learner). */
   async touch(token) {
     if (!token) return;
-    const row = await this.db.prepare('SELECT last_seen_at FROM sessions WHERE token = ?').get(token);
-    if (!row) return;
-    if (Date.now() - Date.parse(row.last_seen_at) > 60_000) {
-      const exp = new Date(Date.now() + this.ttlMs).toISOString();
-      await this.db.prepare('UPDATE sessions SET last_seen_at=?, expires_at=? WHERE token=?')
-        .run(new Date().toISOString(), exp, token);
-    }
+    const cutoff = new Date(Date.now() - 60_000).toISOString();
+    const exp = new Date(Date.now() + this.ttlMs).toISOString();
+    await this.db.prepare(
+      'UPDATE sessions SET last_seen_at = ?, expires_at = ? WHERE token = ? AND last_seen_at < ?'
+    ).run(new Date().toISOString(), exp, token, cutoff);
   }
 
   async destroy(token) {
