@@ -7,6 +7,10 @@ const CACHE_TTL_MS = 30_000;
 const CACHE_MAX = 200;
 const cache = new Map(); // path -> { expires, data?, promise? }
 
+// Older mobile browsers (pre-15.4 Safari, old Android WebViews) lack
+// structuredClone — JSON round-trip is a fine fallback for API payloads.
+const cloneData = (d) => (typeof structuredClone === 'function' ? structuredClone(d) : JSON.parse(JSON.stringify(d)));
+
 function cacheLookup(path) {
   const entry = cache.get(path);
   if (!entry) return null;
@@ -25,8 +29,8 @@ async function request(method, path, { body, raw = false, timeoutMs = 45000, fre
   // Cached GET: repeated navigation reuses the answer instead of re-asking.
   if (method === 'GET' && !fresh) {
     const entry = cacheLookup(path);
-    if (entry?.data !== undefined) return structuredClone(entry.data);
-    if (entry?.promise) return entry.promise.then((d) => structuredClone(d));
+    if (entry?.data !== undefined) return cloneData(entry.data);
+    if (entry?.promise) return entry.promise.then((d) => cloneData(d));
   }
   const headers = { 'X-Requested-With': 'fetch' };
   if (body !== undefined && !raw) headers['Content-Type'] = 'application/json';
@@ -68,7 +72,7 @@ async function request(method, path, { body, raw = false, timeoutMs = 45000, fre
       const data = await flight;
       cache.set(path, { expires: Date.now() + CACHE_TTL_MS, data });
       if (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value);
-      return structuredClone(data);
+      return cloneData(data);
     } catch (e) {
       if (cache.get(path)?.promise === flight) cache.delete(path);
       throw e;

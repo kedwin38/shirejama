@@ -2,6 +2,7 @@
 # Account: Shirejamacadult@gmail.com (51957ff7d191eba103fa8a9b27df7f13)
 # Deploy:  CLOUDFLARE_API_TOKEN=… npx wrangler deploy -c wrangler.prod.toml
 name = "shirejama"
+account_id = "51957ff7d191eba103fa8a9b27df7f13"
 main = "worker.js"
 compatibility_date = "2026-10-01"
 compatibility_flags = ["nodejs_compat"]
