@@ -51,7 +51,7 @@ function build(env) {
   const router = new Router();
   const ctx = {
     db, config, sessions, services,
-    limiter: new RateLimiter({ windowMs: 60_000, max: 12 }),
+    limiter: new RateLimiter({ windowMs: 60_000, max: 20 }),
     setSessionCookie: (res, token) => res?.cookies?.push(
       cookieHeader('sid', token, { maxAgeSeconds: config.sessionTtlHours * 3600 })),
     clearSessionCookie: (res) => res?.cookies?.push(cookieHeader('sid', '', { maxAgeSeconds: 0 })),
