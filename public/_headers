@@ -1,0 +1,18 @@
+# ── Asset caching ──────────────────────────────────────────────────────────
+# Revalidation on every load forces a round trip per asset — on lossy mobile
+# links (Somalia) those extra RTTs are exactly what stalls the app shell at
+# "loading your portal…". Short-lived positive caching + stale-while-
+# revalidate lets repeat loads render from cache instantly and refresh in
+# the background; fonts are content-stable and cache for a month.
+
+/js/*
+  Cache-Control: public, max-age=300, stale-while-revalidate=604800
+
+/assets/app.css
+  Cache-Control: public, max-age=300, stale-while-revalidate=604800
+
+/assets/brand/*
+  Cache-Control: public, max-age=86400, stale-while-revalidate=604800
+
+/assets/fonts/*
+  Cache-Control: public, max-age=2592000, immutable

@@ -82,7 +82,7 @@ async function ensureSeeded(w) {
   if (created) log.info('admin_seeded', { username: admin.username });
 }
 
-async function handleApi(request, env, pathName) {
+async function handleApi(request, env, pathName, execCtx) {
   const w = wiring;
   const started = Date.now();
   try {
@@ -107,7 +107,12 @@ async function handleApi(request, env, pathName) {
       body = await readJsonBody(request, config.caps.jsonBody);
     }
     const ip = request.headers.get('cf-connecting-ip') || '';
-    const cctx = { params: match.params, query, body, user, token, ip };
+    const cctx = {
+      params: match.params, query, body, user, token, ip,
+      // Background task lane: keeps working after the response is sent.
+      // Absent-safe — Node and tests provide a fire-and-forget equivalent.
+      defer: (p) => { try { execCtx?.waitUntil?.(p); } catch { /* already responded */ } p?.catch?.(() => {}); },
+    };
 
     const res = { cookies: [] };
     const result = await match.handler(request, res, cctx);
@@ -190,7 +195,7 @@ export default {
       // unlimited and never invoke this Worker.
       return env.ASSETS.fetch(request);
     }
-    const res = await handleApi(request, env, url.pathname);
+    const res = await handleApi(request, env, url.pathname, execCtx);
     // The API is private machinery — keep it out of the index entirely.
     res.headers.set('X-Robots-Tag', 'noindex, nofollow');
     return res;

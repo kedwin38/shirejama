@@ -126,7 +126,9 @@ const server = createServer(async (req, res) => {
       }
 
       const ip = (req.headers['x-forwarded-for']?.split(',')[0] || req.socket.remoteAddress || '').trim();
-      const cctx = { params: match.params, query, body, user, token, ip };
+      // Background task lane — Worker parity (there it maps to waitUntil).
+      const cctx = { params: match.params, query, body, user, token, ip,
+        defer: (p) => { p?.catch?.(() => {}); } };
 
       const result = await match.handler(req, res, cctx);
       // Handlers that stream files write their own response (headers already

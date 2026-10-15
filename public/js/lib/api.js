@@ -2,9 +2,13 @@
 // Requests cost money at scale, navigation shouldn't: GET responses are
 // held for a short TTL (and in-flight GETs are shared), while ANY successful
 // mutation wipes the cache so writes always read back fresh data.
+// Transient failures (timeout / network blip / 502-504) get one automatic
+// retry — the difference between a lossy mobile connection that recovers
+// and one that shows a dead end.
 
 const CACHE_TTL_MS = 30_000;
 const CACHE_MAX = 200;
+const RETRY_BACKOFF_MS = 1200;
 const cache = new Map(); // path -> { expires, data?, promise? }
 
 // Older mobile browsers (pre-15.4 Safari, old Android WebViews) lack
@@ -25,7 +29,7 @@ export class ApiError extends Error {
   }
 }
 
-async function request(method, path, { body, raw = false, timeoutMs = 45000, fresh = false } = {}) {
+async function attempt(method, path, { body, raw = false, timeoutMs = 45000, fresh = false } = {}) {
   // Cached GET: repeated navigation reuses the answer instead of re-asking.
   if (method === 'GET' && !fresh) {
     const entry = cacheLookup(path);
@@ -83,10 +87,25 @@ async function request(method, path, { body, raw = false, timeoutMs = 45000, fre
   return data;
 }
 
+const retryable = (e) => e instanceof ApiError
+  && (e.status === 0 || e.status === 502 || e.status === 503 || e.status === 504);
+
+async function request(method, path, opts = {}) {
+  const attempts = (opts.retries ?? (method === 'GET' ? 1 : 0)) + 1;
+  for (let i = 1; ; i++) {
+    try {
+      return await attempt(method, path, opts);
+    } catch (e) {
+      if (i >= attempts || !retryable(e)) throw e;
+      await new Promise((r) => setTimeout(r, RETRY_BACKOFF_MS));
+    }
+  }
+}
+
 export const api = {
   get: (p, opts) => request('GET', p, opts),
-  post: (p, body = {}) => request('POST', p, { body }),
-  put: (p, body = {}) => request('PUT', p, { body }),
-  patch: (p, body = {}) => request('PATCH', p, { body }),
-  delete: (p) => request('DELETE', p),
+  post: (p, body = {}, opts = {}) => request('POST', p, { body, ...opts }),
+  put: (p, body = {}, opts = {}) => request('PUT', p, { body, ...opts }),
+  patch: (p, body = {}, opts = {}) => request('PATCH', p, { body, ...opts }),
+  delete: (p, opts) => request('DELETE', p, opts),
 };

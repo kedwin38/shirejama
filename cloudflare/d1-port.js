@@ -1,9 +1,35 @@
 // ── DatabasePort · adapter over D1 (ADR-001 / ADR-005 migration path) ────
 // Same shape as server/core/db.js so every service/route file is shared,
 // unmodified, between the Node server and this Worker.
+import { AppError } from '../server/core/errors.js';
+import { log } from '../server/core/log.js';
+
+// D1's storage layer occasionally stalls for tens of seconds (a documented,
+// intermittent platform issue). Without a local deadline a stalled call hangs
+// the whole request until the browser's abort fires — users saw this as the
+// login "time out". Racing every D1 operation converts stalls into a fast,
+// clean, retryable 503 instead.
+const DEFAULT_DEADLINE_MS = 10_000;
+const MIGRATION_DEADLINE_MS = 30_000;
+
 export class D1Port {
-  constructor(d1) {
+  constructor(d1, { deadlineMs = DEFAULT_DEADLINE_MS } = {}) {
     this.db = d1;
+    this.deadlineMs = deadlineMs;
+  }
+
+  /** Race a D1 operation against a deadline; losers are logged, never fatal. */
+  _g(promise, ms = this.deadlineMs) {
+    let timer;
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        log.warn('db_deadline', { ms, hint: 'D1 storage stalled — request failed fast instead of hanging' });
+        reject(new AppError(503, 'db_unavailable',
+          'The database is responding slowly — please try again in a moment.'));
+      }, ms);
+    });
+    promise.catch(() => {}); // late-arriving loser must not become an unhandled rejection
+    return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
   }
 
   async exec(sql) {
@@ -17,7 +43,7 @@ export class D1Port {
         .map((s) => s.trim().replace(/;$/, ''))
         .filter(Boolean)
         .map((s) => this.db.prepare(s));
-      if (stmts.length) await this.db.batch(stmts);
+      if (stmts.length) await this._g(this.db.batch(stmts), MIGRATION_DEADLINE_MS);
       return;
     }
     await this.db.exec(sql);
@@ -30,7 +56,7 @@ export class D1Port {
    */
   async batch(statements) {
     if (typeof this.db.batch === 'function') {
-      await this.db.batch(statements.map((s) => this.db.prepare(s.sql).bind(...s.params)));
+      await this._g(this.db.batch(statements.map((s) => this.db.prepare(s.sql).bind(...s.params))));
       return;
     }
     for (const s of statements) await this.prepare(s.sql).run(...s.params);
@@ -40,11 +66,11 @@ export class D1Port {
     const stmt = this.db.prepare(sql);
     return {
       run: async (...p) => {
-        const r = await stmt.bind(...p).run();
+        const r = await this._g(stmt.bind(...p).run());
         return { changes: r.meta?.changes ?? 0, lastId: r.meta?.last_row_id ?? 0 };
       },
-      get: async (...p) => (await stmt.bind(...p).first()) ?? null,
-      all: async (...p) => (await stmt.bind(...p).all()).results ?? [],
+      get: async (...p) => (await this._g(stmt.bind(...p).first())) ?? null,
+      all: async (...p) => (await this._g(stmt.bind(...p).all())).results ?? [],
     };
   }
 

@@ -34,9 +34,11 @@ export function renderGate(app, onAuthed) {
     submitBtn.disabled = true;
     submitBtn.textContent = 'Signing in…';
     try {
+      // Sign-in gets a shorter budget plus one automatic retry — a stalled
+      // or hiccuped first attempt recovers instead of dead-ending the user.
       const { user } = await api.post('/api/auth/login', {
         role: selectedRole, identifier: identifier.value.trim(), password: password.value,
-      });
+      }, { timeoutMs: 20_000, retries: 1 });
       toast(`Welcome, ${user.full_name}.`, 'ok');
       onAuthed(user);
     } catch (err) {
