@@ -118,6 +118,9 @@ async function handleApi(request, env, pathName) {
     headers.set('Referrer-Policy', 'same-origin');
     headers.set('X-Frame-Options', 'SAMEORIGIN');
     headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+    // API freshness is owned by the client-side cache — keep the HTTP cache
+    // out of it so the two layers can never disagree.
+    headers.set('Cache-Control', 'no-store');
     for (const c of res.cookies) headers.append('Set-Cookie', c);
     log.info('http', { method: request.method, path: pathName, status: response.status,
       ms: Date.now() - started, user: user?.username ?? null });

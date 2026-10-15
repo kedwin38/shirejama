@@ -21,8 +21,7 @@ import { AttemptService } from './services/attempts.js';
 import { GradingService } from './services/grading.js';
 import { CatalogService } from './services/catalog.js';
 import { AnalyticsService } from './services/analytics.js';
-import { BackupEngine, BackupScheduler, JSONDumpFormat } from './services/backups.js';
-import { LocalDiskTarget, SQLiteSnapshotFormat } from './services/backups-node.js';
+import { BackupEngine } from './services/backups.js';
 
 import { registerAuthRoutes } from './routes/auth.routes.js';
 import { registerAdminRoutes } from './routes/admin.routes.js';
@@ -55,16 +54,13 @@ const services = {
   vault,
 };
 
-const backupEngine = new BackupEngine(db, config.dbFile, {
-  target: new LocalDiskTarget(config.backupsDir),
-  formats: [new SQLiteSnapshotFormat(), new JSONDumpFormat()],
-});
+const backupEngine = new BackupEngine(db, config.dbFile);
 services.backups = backupEngine;
 
 const router = new Router();
 const ctx = {
   db, config, sessions, services,
-  limiter: new RateLimiter({ windowMs: 60_000, max: 12 }),
+  limiter: new RateLimiter({ windowMs: 60_000, max: 20 }),
   setSessionCookie: (res, token) => setCookie(res, 'sid', token, {
     maxAgeSeconds: config.sessionTtlHours * 3600,
   }),
@@ -99,6 +95,9 @@ const server = createServer(async (req, res) => {
   res.setHeader('Referrer-Policy', 'same-origin');
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  // API freshness is owned by the client-side cache — keep the HTTP cache
+  // out of it so the two layers can never disagree.
+  if (pathName.startsWith('/api/')) res.setHeader('Cache-Control', 'no-store');
 
   try {
     if (pathName.startsWith('/api/')) {
@@ -154,8 +153,10 @@ const server = createServer(async (req, res) => {
 });
 
 // ── Scheduler + lifecycle ─────────────────────────────────────────────────
-const scheduler = new BackupScheduler(backupEngine);
-scheduler.start();
+// Cron parity with the Worker's scheduled handler: the engine's tick
+// respects the off-by-default policy and the configured frequency.
+const scheduler = setInterval(() => backupEngine.tick().catch(() => {}), 30 * 60_000);
+scheduler.unref();
 
 server.listen(config.port, config.host, () => {
   log.info('server_listening', {
@@ -166,7 +167,7 @@ server.listen(config.port, config.host, () => {
 
 const shutdown = (signal) => {
   log.info('shutdown', { signal });
-  scheduler.stop();
+  clearInterval(scheduler);
   server.close(() => { db.close(); process.exit(0); });
   setTimeout(() => process.exit(0), 3000).unref();
 };
