@@ -3,7 +3,7 @@
 // internal username). Teachers/admins still require an email address.
 import { AppError, badRequest, conflict, notFound, weakPassword } from '../core/errors.js';
 import { hashPassword, verifyPassword, passwordPolicyProblems } from '../core/passwords.js';
-import { generateUsername, nextInstructorCode, nextStudentId, usernameBase, allocateUsername } from '../core/ids.js';
+import { generateUsername, nextInstructorCode, usernameBase, allocateUsername } from '../core/ids.js';
 import { nowIso, reqEmail, reqString, reqLevel } from '../core/validate.js';
 
 // Student IDs are stored EXACTLY as the institution provides them ("12345678"
@@ -119,21 +119,19 @@ export class UserService {
     const name = reqString(full_name, 'full name', { min: 3, max: 120 });
     const level = reqLevel(academic_level);
     this._assertPassword(password);
-    let givenSid = typeof student_id === 'string' ? cleanStudentId(student_id) : '';
-    if (givenSid && !validStudentId(givenSid)) {
+    // Mandatory: single provision always carries the institution's own ID —
+    // stored exactly as provided (bulk upload may still auto-mint for blanks).
+    const givenSid = cleanStudentId(student_id);
+    if (!givenSid) throw badRequest('Student ID is required (e.g. 12345678).');
+    if (!validStudentId(givenSid)) {
       throw badRequest('Student ID must be 1–40 characters with no spaces (stored exactly as you enter it).');
     }
 
     return await this.db.transaction(async () => {
-      let sid;
-      if (givenSid) {
-        if (await this.db.prepare('SELECT 1 FROM users WHERE student_id = ?').get(givenSid)) {
-          throw conflict(`A student account already exists with ID ${givenSid}.`);
-        }
-        sid = givenSid;
-      } else {
-        sid = await nextStudentId(this.db);
+      if (await this.db.prepare('SELECT 1 FROM users WHERE student_id = ?').get(givenSid)) {
+        throw conflict(`A student account already exists with ID ${givenSid}.`);
       }
+      const sid = givenSid;
       const username = await generateUsername(this.db, name);
       const now = nowIso();
       const { lastId } = await this.db.prepare(`

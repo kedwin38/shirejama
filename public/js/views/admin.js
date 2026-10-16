@@ -648,7 +648,7 @@ function teacherForm() {
 
 function studentForm() {
   const name = el('input', { class: 'input', placeholder: 'Full name' });
-  const sid = el('input', { class: 'input mono', placeholder: 'Leave blank to auto-generate (STD-…)' });
+  const sid = el('input', { class: 'input mono', placeholder: 'e.g. 12345678' });
   const level = el('select', { class: 'select' },
     el('option', { value: '' }, 'Select academic level…'),
     LEVELS.map((l) => el('option', { value: l }, LEVEL_LABELS[l])));
@@ -659,18 +659,19 @@ function studentForm() {
   return el('div', { class: 'card frame' }, el('div', { class: 'card-pad' },
     el('div', { class: 'card-title-row' }, el('span', { class: 'ic', style: 'color:var(--gold-600)' }, icons.award()), el('h3', {}, 'Student Account'), el('span', { class: 'sub' }, 'learner')),
     el('div', { class: 'field' }, el('label', {}, 'FULL NAME ', el('span', { class: 'req' }, '*')), name),
-    el('div', { class: 'field' }, el('label', {}, 'STUDENT ID (OPTIONAL)'), sid,
-      el('div', { class: 'hint' }, 'The student signs in with this ID. Blank = auto-generate.')),
+    el('div', { class: 'field' }, el('label', {}, 'STUDENT ID ', el('span', { class: 'req' }, '*')), sid,
+      el('div', { class: 'hint' }, 'The student signs in with this ID. Stored exactly as you enter it.')),
     el('div', { class: 'field' }, el('label', {}, 'ACADEMIC LEVEL ', el('span', { class: 'req' }, '*')), level,
       el('div', { class: 'hint' }, 'Determines which courses the student sees.')),
     pw, err, result,
     el('button', { class: 'btn primary mt-1', onclick: async () => {
       err.textContent = ''; result.replaceChildren();
+      if (!sid.value.trim()) { err.textContent = 'Enter the Student ID (e.g. 12345678).'; return; }
       if (!level.value) { err.textContent = 'Choose an academic level.'; return; }
       if (!pwOk) { err.textContent = 'Set a policy-compliant temporary password first.'; return; }
       try {
         const { user } = await api.post('/api/admin/students', {
-          full_name: name.value, student_id: sid.value || undefined, academic_level: level.value,
+          full_name: name.value, student_id: sid.value.trim(), academic_level: level.value,
           password: pw.querySelector('input').value,
         });
         result.replaceChildren(el('div', { class: 'chip ok mt-1' }, icons.checkCircle(),
