@@ -76,7 +76,7 @@ export function renderGate(app, onAuthed) {
       card.setAttribute('aria-checked', on ? 'true' : 'false');
     }
     identifier.placeholder = id === 'student'
-      ? 'Your Student ID (e.g. STD-2026-1001)'
+      ? 'Your Student ID (e.g. 12345678)'
       : 'e.g. hodan.abdi or name@school.org';
     identifier.closest('.field').querySelector('label').textContent = id === 'student'
       ? 'STUDENT ID (OR USERNAME)' : 'USERNAME OR EMAIL';

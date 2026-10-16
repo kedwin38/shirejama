@@ -61,6 +61,13 @@ export function registerAdminRoutes(router, ctx) {
     return await services.users.delete(Number(c.params.id));
   });
 
+  // Bulk delete — per-row guards still apply; returns a full report of what
+  // was deleted and what was refused (and why).
+  router.post('/api/admin/users/bulk-delete', async (req, res, c) => {
+    admin(c);
+    return await services.users.bulkDelete(c.body?.ids ?? []);
+  });
+
   // ── Backup console (FR-7) — admin-connected S3-compatible storage ─────
   router.get('/api/admin/backups', async (req, res, c) => {
     admin(c);

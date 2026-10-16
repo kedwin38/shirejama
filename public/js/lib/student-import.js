@@ -148,12 +148,13 @@ function rowsToStudents(rows) {
   for (let i = start; i < rows.length && students.length < MAX_ROWS; i++) {
     const [name, student_id, ...extra] = rows[i];
     if (!name && !student_id) continue; // blank line
+    // IDs pass through EXACTLY as provided — no uppercasing, no reformatting.
     const row = { row: i + 1, name: name ?? '', student_id: (student_id ?? '').trim() };
     if (row.name.length < 3) { invalid.push({ ...row, reason: 'Name must be 3–120 characters.' }); continue; }
-    if (row.student_id.length < 3 || row.student_id.length > 40 || row.student_id.includes('@')) {
-      invalid.push({ ...row, reason: 'Student ID must be 3–40 letters/digits/hyphens.' }); continue;
+    if (row.student_id.length < 1 || row.student_id.length > 40 || row.student_id.includes('@') || /\s/.test(row.student_id)) {
+      invalid.push({ ...row, reason: 'Student ID must be 1–40 characters with no spaces.' }); continue;
     }
-    students.push({ name: row.name.trim(), student_id: row.student_id.toUpperCase().replace(/\s+/g, '') });
+    students.push({ name: row.name.trim(), student_id: row.student_id });
   }
   return { rows: students, invalid };
 }

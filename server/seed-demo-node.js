@@ -28,7 +28,7 @@ export async function seedDemo(db) {
     instructor_code: 'INST-101', password: 'Teacher@2026',
   });
   const studentId = await mkUser('student', 'Amina Yusuf', 'amina.yusuf@shirejama.school', {
-    student_id: `STD-${new Date().getUTCFullYear()}-1001`,
+    student_id: '100001',
     academic_level: 'F1', password: 'Student@2026',
   });
 

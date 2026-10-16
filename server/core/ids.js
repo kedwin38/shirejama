@@ -12,14 +12,17 @@ export async function nextInstructorCode(db) {
   return `INST-${next}`;
 }
 
+// Auto-minted Student IDs are PLAIN NUMBERS ("100001", "100002"…) — the
+// institution's own IDs are stored exactly as provided, so generated ones
+// must follow the same clean, hyphen-and-prefix-free format.
 export async function nextStudentId(db) {
-  const year = new Date().getUTCFullYear();
   const row = await db.prepare(`
-    SELECT MAX(CAST(SUBSTR(student_id, ?) AS INTEGER)) AS m
-    FROM users WHERE role='student' AND student_id LIKE ?
-  `).get(`${`STD-${year}-`.length + 1}`, `STD-${year}-%`);
-  const next = Math.max(1000, Number(row?.m ?? 1000)) + 1;
-  return `STD-${year}-${next}`;
+    SELECT MAX(CAST(student_id AS INTEGER)) AS m
+    FROM users WHERE role='student'
+      AND student_id GLOB '[0-9]*' AND student_id NOT GLOB '*[^0-9]*'
+  `).get();
+  const next = Math.max(100000, Number(row?.m ?? 100000)) + 1;
+  return String(next);
 }
 
 const transliterate = (name) => name.toLowerCase()

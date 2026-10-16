@@ -1,5 +1,5 @@
 // ── Administrator portal (FR-3.x, FR-7) ───────────────────────────────────
-import { api } from '../lib/api.js';
+import { api, timeoutSignal } from '../lib/api.js';
 import { el, icons, toast, confirmDialog, openModal, closeModal,
          fmtDate, fmtBytes, fmtDateTime, LEVEL_LABELS, passwordProblems, downloadCsv } from '../lib/ui.js';
 import { parseStudentsFile } from '../lib/student-import.js';
@@ -66,17 +66,78 @@ const stat = (label, value, foot, ico) =>
 async function renderAccounts(main) {
   let role = 'teacher', q = '';
   let lastUsers = [];
+  const selected = new Set(); // account ids picked for bulk operations
   const tblWrap = el('div');
+  const bulkBar = el('div', { class: 'row mb-2', style: 'display:none;align-items:center;gap:10px' });
+
+  function syncBulkBar() {
+    const n = selected.size;
+    const shown = role === 'student' && n > 0;
+    bulkBar.style.display = shown ? 'flex' : 'none';
+    bulkBar.replaceChildren(
+      el('span', { class: 'chip warn' }, `${n} student${n === 1 ? '' : 's'} selected`),
+      el('button', { class: 'btn sm', style: 'background:var(--danger,#dc2626);color:#fff;border-color:var(--danger,#dc2626)',
+        onclick: confirmBulkDelete }, 'Delete selected…'),
+      el('button', { class: 'btn ghost sm', onclick: () => { selected.clear(); drawTable(lastUsers); syncBulkBar(); } }, 'Clear selection'));
+  }
+
+  function confirmBulkDelete() {
+    const targets = lastUsers.filter((u) => selected.has(u.id) && u.role === 'student');
+    if (!targets.length) { toast('No selected students in this list.', 'info'); return; }
+    openModal((card, done) => {
+      const err = el('div', { class: 'err-line' });
+      const preview = targets.slice(0, 5).map((u) => `${u.full_name} (${u.student_id || u.username})`).join(' · ');
+      card.append(
+        el('div', { class: 'modal-head' }, el('h3', {}, 'Delete student accounts?'),
+          el('button', { class: 'icon-btn x', onclick: done }, icons.x())),
+        el('div', { class: 'modal-body' },
+          el('p', { class: 'mt-0' }, 'You are about to ', el('b', { style: 'color:var(--danger,#dc2626)' }, `permanently delete ${targets.length} student account${targets.length === 1 ? '' : 's'}`),
+            '. Their sessions, quiz attempts, answers and progress are erased with them. This cannot be undone.'),
+          targets.length > 0 && el('p', { class: 'hint' }, preview + (targets.length > 5 ? ` … and ${targets.length - 5} more` : '')),
+          err),
+        el('div', { class: 'modal-foot' },
+          el('button', { class: 'btn ghost', onclick: done }, 'Cancel — keep accounts'),
+          el('button', { class: 'btn', style: 'background:var(--danger,#dc2626);color:#fff;border-color:var(--danger,#dc2626)',
+            onclick: async () => {
+              err.textContent = '';
+              try {
+                const r = await api.post('/api/admin/users/bulk-delete', { ids: [...selected] });
+                done();
+                selected.clear();
+                await load();
+                toast(r.failed_count
+                  ? `Deleted ${r.deleted_count}; ${r.failed_count} refused (see list).`
+                  : `Deleted ${r.deleted_count} account${r.deleted_count === 1 ? '' : 's'}.`,
+                  r.failed_count ? 'info' : 'ok', 5000);
+              } catch (e) { err.textContent = e.message; }
+            } }, `Yes — delete ${targets.length} permanently`)),
+      );
+    });
+  }
 
   async function load() {
     tblWrap.replaceChildren(...Array.from({ length: 6 }, () => el('div', { class: 'skel mt-1', style: 'height:38px' })));
     const { users } = await api.get(`/api/admin/users?role=${role}&q=${encodeURIComponent(q)}`);
     lastUsers = users;
+    // Selection is per-list: drop ids that left the current view.
+    for (const id of [...selected]) if (!users.some((u) => u.id === id)) selected.delete(id);
     drawTable(users);
+    syncBulkBar();
   }
 
   function drawTable(users) {
+    const bulk = role === 'student';
     const head = { teacher: ['Instructor', 'Code', 'Email', 'Courses', 'Status', ''], student: ['Student_ID', 'Student_Name', 'Level', 'Status', ''], admin: ['Administrator', 'Username', 'Email', '', 'Status', ''] }[role];
+    const selectBox = (u) => el('input', { type: 'checkbox', style: 'width:16px;height:16px;cursor:pointer',
+      checked: selected.has(u.id) ? '' : undefined,
+      onchange: (e) => { if (e.target.checked) selected.add(u.id); else selected.delete(u.id); syncBulkBar(); } });
+    const selectAll = () => el('input', { type: 'checkbox', title: 'Select every student in this list', style: 'width:16px;height:16px;cursor:pointer',
+      checked: bulk && users.length > 0 && users.every((u) => selected.has(u.id)) ? '' : undefined,
+      onchange: (e) => {
+        if (e.target.checked) users.forEach((u) => selected.add(u.id));
+        else users.forEach((u) => selected.delete(u.id));
+        drawTable(users); syncBulkBar();
+      } });
     const actionsCell = (u) => el('td', {}, el('div', { class: 'row-actions' },
       el('button', { class: 'btn sm ghost', title: 'Edit account details', onclick: () => editUser(u) }, 'Edit'),
       el('button', { class: 'btn sm ghost', title: 'Reset this user\u2019s password', onclick: () => resetPassword(u) }, 'Reset password'),
@@ -88,10 +149,13 @@ async function renderAccounts(main) {
       users.length === 0 ? el('div', { class: 'empty' }, el('div', { class: 'e-ico' }, icons.search()),
         el('h4', {}, 'No accounts found'), el('p', {}, 'Try a different search or role tab.')) :
       el('div', { class: 'table-wrap' }, el('table', { class: 'tbl' },
-        el('thead', {}, el('tr', {}, head.map((h) => el('th', {}, h)))),
+        el('thead', {}, el('tr', {},
+          bulk ? el('th', { style: 'width:34px' }, selectAll()) : null,
+          ...head.map((h) => el('th', {}, h)))),
         el('tbody', {}, users.map((u) =>
           role === 'student'
             ? el('tr', {},
+                el('td', {}, selectBox(u)),
                 el('td', {}, el('span', { class: 'chip gold mono' }, u.student_id || '—')),
                 el('td', {}, el('b', {}, u.full_name)),
                 el('td', {}, LEVEL_LABELS[u.academic_level] || '—'),
@@ -120,7 +184,7 @@ async function renderAccounts(main) {
     el('div', { class: 'tabs', role: 'tablist' },
       ['teacher', 'student', 'admin'].map((r) => el('button', {
         class: 'tab' + (role === r ? ' active' : ''), role: 'tab', 'aria-selected': role === r ? 'true' : 'false',
-        onclick: (e) => { role = r; [...e.currentTarget.parentNode.children].forEach((b) => b.classList.remove('active')); e.currentTarget.classList.add('active'); load(); },
+        onclick: (e) => { role = r; selected.clear(); [...e.currentTarget.parentNode.children].forEach((b) => b.classList.remove('active')); e.currentTarget.classList.add('active'); load(); },
       }, { teacher: 'Teachers', student: 'Students', admin: 'Administrators' }[r]))),
     el('div', { class: 'row mb-2' },
       search,
@@ -137,6 +201,7 @@ async function renderAccounts(main) {
         toast(`accounts-${role}.csv exported.`, 'ok', 2500);
       } }, el('span', { class: 'ic' }, icons.download()), 'Export CSV'),
       el('span', { class: 'spacer' })),
+    bulkBar,
     tblWrap,
   );
   await load();
@@ -280,8 +345,8 @@ function bulkStudentForm() {
       downloadCsv('student-list-template.csv',
         ['Name', 'Student_ID'],
         [
-          ['Amina Yusuf', 'ADM-2026-0601'],
-          ['Botan Ahmed', 'ADM-2026-0602'],
+          ['Amina Yusuf', '12345678'],
+          ['Botan Ahmed', '12345679'],
         ]);
       toast('Template downloaded — replace the example rows with your students.', 'info', 4500);
     } }, el('span', { class: 'ic' }, icons.download()), 'CSV template');
@@ -382,7 +447,7 @@ function bulkStudentForm() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'fetch' },
         credentials: 'same-origin',
-        signal: AbortSignal.timeout(timeoutMs),
+        signal: timeoutSignal(timeoutMs),
         body: JSON.stringify(body),
       });
       let data = null;

@@ -15,6 +15,22 @@ const cache = new Map(); // path -> { expires, data?, promise? }
 // structuredClone — JSON round-trip is a fine fallback for API payloads.
 const cloneData = (d) => (typeof structuredClone === 'function' ? structuredClone(d) : JSON.parse(JSON.stringify(d)));
 
+// AbortSignal.timeout() landed in Chrome/Edge 103. On the older Edge builds
+// still common in the field (frozen Windows 7/8 installs, unupdated Win10),
+// calling it throws — and every request then looks like a "network error",
+// which is exactly "works in Chrome, dead in Edge". Manual controller works
+// everywhere with identical semantics.
+export const timeoutSignal = (ms) => {
+  if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
+    return AbortSignal.timeout(ms);
+  }
+  const controller = new AbortController();
+  const reason = new Error('timeout');
+  reason.name = 'TimeoutError'; // engines that honor abort reasons surface this
+  setTimeout(() => controller.abort(reason), ms);
+  return controller.signal;
+};
+
 function cacheLookup(path) {
   const entry = cache.get(path);
   if (!entry) return null;
@@ -46,7 +62,7 @@ async function attempt(method, path, { body, raw = false, timeoutMs = 45000, fre
         headers,
         credentials: 'same-origin',
         body: body === undefined ? undefined : (raw ? body : JSON.stringify(body)),
-        signal: AbortSignal.timeout(timeoutMs),
+        signal: timeoutSignal(timeoutMs),
       });
     } catch (e) {
       // A hung request must never hang the user — turn it into a clear error

@@ -6,8 +6,10 @@ import { hashPassword, verifyPassword, passwordPolicyProblems } from '../core/pa
 import { generateUsername, nextInstructorCode, nextStudentId, usernameBase, allocateUsername } from '../core/ids.js';
 import { nowIso, reqEmail, reqString, reqLevel } from '../core/validate.js';
 
-const cleanStudentId = (v) => String(v ?? '').trim().toUpperCase().replace(/\s+/g, '');
-const validStudentId = (sid) => sid.length >= 3 && sid.length <= 40 && !sid.includes('@');
+// Student IDs are stored EXACTLY as the institution provides them ("12345678"
+// stays "12345678") — no uppercasing, no reformatting, no injected prefixes.
+const cleanStudentId = (v) => String(v ?? '').trim();
+const validStudentId = (sid) => sid.length >= 1 && sid.length <= 40 && !sid.includes('@') && !/\s/.test(sid);
 
 export class UserService {
   constructor(db) { this.db = db; }
@@ -119,7 +121,7 @@ export class UserService {
     this._assertPassword(password);
     let givenSid = typeof student_id === 'string' ? cleanStudentId(student_id) : '';
     if (givenSid && !validStudentId(givenSid)) {
-      throw badRequest('Student ID must be 3–40 letters/digits/hyphens.');
+      throw badRequest('Student ID must be 1–40 characters with no spaces (stored exactly as you enter it).');
     }
 
     return await this.db.transaction(async () => {
@@ -173,7 +175,7 @@ export class UserService {
         continue;
       }
       if (!validStudentId(sid)) {
-        invalid.push({ row: i + 1, name, student_id: sid, reason: 'Student ID must be 3–40 letters/digits/hyphens.' });
+        invalid.push({ row: i + 1, name, student_id: sid, reason: 'Student ID must be 1–40 characters with no spaces.' });
         continue;
       }
       if (seenIds.has(sid)) {
@@ -263,7 +265,7 @@ export class UserService {
     if (user.role === 'student') {
       if (patch.student_id !== undefined) {
         const sid = cleanStudentId(patch.student_id);
-        if (!validStudentId(sid)) throw badRequest('Student ID must be 3–40 letters/digits/hyphens.');
+        if (!validStudentId(sid)) throw badRequest('Student ID must be 1–40 characters with no spaces.');
         const dupe = await this.db.prepare('SELECT id FROM users WHERE student_id = ? AND id != ?').get(sid, id);
         if (dupe) throw conflict(`Student ID ${sid} is already assigned.`);
         fields.student_id = sid;
@@ -327,5 +329,30 @@ export class UserService {
     // students: attempts/progress cascade; sessions cascade.
     await this.db.prepare('DELETE FROM users WHERE id = ?').run(id);
     return { ok: true };
+  }
+
+  /**
+   * Bulk delete — same per-row guards as delete() (admins refused, teachers
+   * with courses refused), applied account by account so one blocked row
+   * never aborts the rest. Returns exactly what happened, for the report.
+   */
+  async bulkDelete(ids) {
+    if (!Array.isArray(ids) || ids.length === 0) throw badRequest('Select at least one account.');
+    if (ids.length > 200) throw badRequest('Bulk delete accepts up to 200 accounts per request.');
+    const deleted = [], failed = [];
+    for (const raw of ids) {
+      const id = Number(raw);
+      if (!Number.isInteger(id) || id <= 0) { failed.push({ id: raw, name: '—', reason: 'Invalid account reference.' }); continue; }
+      let user;
+      try { user = await this._byId(id); }
+      catch { failed.push({ id, name: '—', reason: 'Account not found.' }); continue; }
+      try {
+        await this.delete(id);
+        deleted.push({ id, name: user.full_name, student_id: user.student_id ?? null });
+      } catch (e) {
+        failed.push({ id, name: user.full_name, student_id: user.student_id ?? null, reason: e.message });
+      }
+    }
+    return { deleted, failed, deleted_count: deleted.length, failed_count: failed.length };
   }
 }
