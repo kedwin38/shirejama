@@ -65,8 +65,8 @@ export function renderGate(app, onAuthed) {
         '“', el('b', {}, 'Aqoon la\'aan waa iftiin la\'aan.'), '” — Without knowledge, there is no light. ',
         'Somali proverb, honoured daily at Shire Jama\'a Ahmed Adult School.'),
     ),
-    el('div', { class: 'gate-foot' }, 'Shire Jama LMS · Adult learning, anywhere on earth · UTC-aware coursework · by ',
-      el('a', { href: 'https://www.vervevector.digital', target: '_blank', rel: 'noopener' }, 'VerveVector')),
+    el('div', { class: 'gate-foot' }, 'Shire Jama LMS · Adult learning, anywhere on earth · UTC-aware coursework · Developed by ',
+      el('a', { href: 'https://www.vervevector.digital', target: '_blank', rel: 'noopener' }, 'vervevector')),
   );
 
   function selectRole(id) {
