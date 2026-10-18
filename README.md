@@ -16,11 +16,6 @@ node server/index.js          # that's the whole install
 ```
 Open **http://localhost:3000**. First boot seeds the institution:
 
-| Role | Username | Password | Notes |
-|---|---|---|---|
-| Administrator | `admin` | `Admin@Shire2026` | change via `ADMIN_PASSWORD` env |
-| Teacher (demo) | `hodan.abdi` | `Teacher@2026` | `INST-101` |
-| Student (demo) | `amina.yusuf` | `Student@2026` | `STD-2026-1001`, Form 1 |
 
 The demo course ships with a generated PDF worksheet, a streaming video
 lecture, and a quiz (2 auto-graded MC + 1 manually-graded document task).
